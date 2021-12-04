@@ -35,8 +35,8 @@ Upcoming: Forward Propagation
 Using first derivative statistics for APT as a function of the apogee
 and perigee, propagate debris forward in time and get an idea of what
 the next N years may look like.  This feature is intended for things
-like examiing the potential future consequences of the Nudol attack or
-discussing the effects of continued use of ASAT weapons.
+like examining the potential future consequences of the Nudol attack
+or discussing the effects of continued use of ASAT weapons.
 
 
 
@@ -74,6 +74,13 @@ python to launch separate processes.  It takes about 100-200ms per
 image.
 
 
+Build the video
+---------------
+
+Pretty trivial `ffmpeg` command, but there's a convenience script:
+`bin/producer`
+
+
 
 Oblate Sphereoids are Annoying
 ==============================
@@ -91,7 +98,7 @@ problems that are worthy of consideration.
 
  1. If you have a satellite that is a perfect polar orbit and a
     perfect circle (relative to the center of the Earth), then as it
-    approaches the equater (where the planet bulges), the AGL (Above
+    approaches the equator (where the planet bulges), the AGL (Above
     Ground Level) orbital altitude will decrease.  So the meaning of
     perigee and apogee can get a little fuzzy.  If it is computed by
     subtracting the mean Earth radius from the minimum radius from
@@ -128,7 +135,8 @@ laptop).
 
 NOTE: There's a hard-coded matplotlib command in there that changes
       the rendering engine to `TkAgg` to prevent memory leaks.  It
-      also disables interactive mode.
+      also disables interactive mode.  This step is only thought to be
+      necessary when you're working with macos.
 
 
 Local DB
@@ -139,7 +147,7 @@ APT values.
 
  * `DB_NAME_IDX`: `<des>,<ts>: fff`
  * `DB_NAME_GABBY`: `<ts>,<des>: fff`
- * `DB_NAME_SCOPE`: `<des>: ff`
+ * `DB_NAME_SCOPE`: `<des>: ii`
 
  * `DB_NAME_TLE`: Unused at the moment, but the idea is to have the
                   ability to record all other structured data from the
@@ -178,41 +186,41 @@ Files
 To Do
 =====
 
- [ ] Add an option during the snarf phase to, for a subset of the
-     TLEs, use an SGP4 propagator to simulate one complete orbit and
-     observe the min and max values for a better approximation of the
-     apogee and perigee.
+ * Add an option during the snarf phase to, for a subset of the
+   TLEs, use an SGP4 propagator to simulate one complete orbit and
+   observe the min and max values for a better approximation of the
+   apogee and perigee.
 
- [ ] Ideally, find an analytical approximateion of the form APT(TLE)
-     that takes into account J2 and can be run quickly enough to
-     properly import APT values for all TLEs
+ * Ideally, find an analytical approximateion of the form APT(TLE)
+   that takes into account J2 and can be run quickly enough to
+   properly import APT values for all TLEs
 
- [ ] Compute the frequency histogram of A'(A,P), P'(A,P), and T'(A,P)
+ * Compute the frequency histogram of A'(A,P), P'(A,P), and T'(A,P)
 
- [ ] Expand the PMF with resample_poly (or resample, who cares if we
-     do a polyphase decomp on this one).
+ * Expand the PMF with resample_poly (or resample, who cares if we
+   do a polyphase decomp on this one).
 
- [ ] Reverse-propagate all samples for a given breakup event from
-     initial observation back to a hypothesized start at the time of
-     the breakup.
+ * Reverse-propagate all samples for a given breakup event from
+   initial observation back to a hypothesized start at the time of
+   the breakup.
 
- [ ] Forward-propagate all observations for the recent nudol test
-     using the frequency distributions observed from past breakup
-     events.
+ * Forward-propagate all observations for the recent nudol test
+   using the frequency distributions observed from past breakup
+   events.
 
- [ ] Look into normalizing the data for the B* term in the TLE.
+ * Look into normalizing the data for the B* term in the TLE.
 
- [ ] Import prior data for solar activity and normalize the frequency
-     distributions for past solar activity.
+ * Import prior data for solar activity and normalize the frequency
+   distributions for past solar activity.
 
- [ ] Incorporate expected future solar activity into the forward
-     propagation.
+ * Incorporate expected future solar activity into the forward
+   propagation.
 
- [ ] Clean up the data.  For example designator 93036ABC has about a
-     13.5 mean motion except for one single observation which is
-     closer to 11.25.  That kind of data quality causes some pretty
-     interesting behavior in the generated videos.
+ * Clean up the data.  For example designator 93036ABC has about a
+   13.5 mean motion except for one single observation which is
+   closer to 11.25.  That kind of data quality causes some pretty
+   interesting behavior in the generated videos.
 
- [ ] Add historical solar activity into the lower plot on the gabby
-     plot indicating level of solar activity, probably as background
-     shading or something.
+ * Add historical solar activity into the lower plot on the gabby
+   plot indicating level of solar activity, probably as background
+   shading or something.
