@@ -57,6 +57,10 @@ sayin'...
 Snarf in the Data
 -----------------
 
+```
+newton@cambridge ~/gabby $ ./bin/snarf -d my.db ~/tmp/tles/tle2005.txt
+```
+
 Gabby really only pays attention to 3 numbers for any given object at
 any given moment: APT.  Apogee (A), Perigee (P), and Orbital Period
 (T).  The ingestion process will parse the TLE files, compute the APT
@@ -68,6 +72,10 @@ license.  See the note below about oblate sphereoids below.
 Plot the Frames
 ---------------
 
+```
+newton@cambridge ~/gabby $ ./bin/plot -d my.db -c my.cfg -t feng -n 7 -C
+```
+
 Gabby will use the DB to produce the png files.  Matplotlib isn't
 particularly threadsafe, so it uses the multiprocessing module in
 python to launch separate processes.  It takes about 100-200ms per
@@ -76,6 +84,10 @@ image.
 
 Build the video
 ---------------
+
+```
+newton@cambridge ~/gabby $ ./bin/producer -y -t feng
+```
 
 Pretty trivial `ffmpeg` command, but there's a convenience script:
 `bin/producer`
