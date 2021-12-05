@@ -1,0 +1,138 @@
+#!/usr/bin/env python
+
+import argparse
+import configparser
+import datetime
+import logging
+import matplotlib
+import matplotlib.pyplot as plt
+import os
+import pprint
+import subprocess
+import sys
+
+import gabby
+
+
+if __name__ == '__main__':
+    desc = """Produces the video
+    """
+
+    formatter = argparse.RawTextHelpFormatter
+    parser = argparse.ArgumentParser(description=desc,
+                                     formatter_class=formatter)
+
+    parser.add_argument('--config-file', '-c',
+                        metavar='CONFIG_PATH',
+                        action='store',
+                        dest='cfg',
+                        required=False,
+                        type=str,
+                        default='cfg/asat.cfg',
+                        help='Path to the config file (%(default)s)')
+
+    parser.add_argument('--target', '-t',
+                        metavar='TARGET',
+                        action='store',
+                        dest='tgt',
+                        required=False,
+                        type=str,
+                        default='shakti',
+                        help='The ASAT to build video for (%(default)s)')
+
+    parser.add_argument('--num-threads', '-n',
+                        metavar='NUM_THREADS',
+                        action='store',
+                        dest='n_threads',
+                        required=False,
+                        type=int,
+                        help='The number of threads to use (%(default)s)')
+
+    parser.add_argument('--yes', '-y',
+                        action='store_true',
+                        dest='yes',
+                        help='Overwrite the old video')
+
+    parser.add_argument('--output-directory', '-o',
+                        metavar='OUTPUT_DIR',
+                        action='store',
+                        dest='output_dir',
+                        required=False,
+                        type=str,
+                        default='output/%(tgt)s',
+                        help='Output directory (%(default)s)',)
+
+    parser.add_argument('--log-file', '-l',
+                        metavar='LOG_FILE',
+                        action='store',
+                        dest='log_file',
+                        type=str,
+                        default='%(output_dir)s/plot-%(tgt)s.log',
+                        help='Logfile in output directory (%(default)s)')
+
+    parser.add_argument('--log-level', '-L',
+                        metavar='LOG_LEVEL',
+                        action='store',
+                        dest='log_level',
+                        type=str,
+                        default='info',
+                        choices=['critical',
+                                 'error',
+                                 'warning',
+                                 'info',
+                                 'debug'],
+                        help='Log level to use (%(default)s)')
+
+    args = parser.parse_args()
+
+
+    arg_dict = {
+        'tgt': args.tgt
+        }
+
+    # Get our output directory all set up
+    output_dir = args.output_dir % arg_dict
+    arg_dict['output_dir'] = output_dir
+    gabby.mkdir_p(output_dir)
+
+    # Get set up to log
+    log_file = args.log_file%arg_dict
+    gabby.setup_logging(log_file=log_file,
+                        log_level=args.log_level)
+    logging.info(f"Let's go, Lucas!")
+
+    # Load the config file
+    logging.info(f"Loading config file: {args.cfg}")
+    cfg = configparser.ConfigParser(allow_no_value=True)
+    cfg.read(args.cfg)
+
+    # Find the target
+    tgt = cfg['gabby-'+args.tgt]
+
+    # Aaaaaaannnnd ACTION!
+    start_d = datetime.datetime.strptime(tgt['start-date'],
+                                         cfg['general']['timestamp-fmt'])
+    end_d = datetime.datetime.strptime(tgt['end-date'],
+                                       cfg['general']['timestamp-fmt'])
+    plot_period = tgt.getint('plot-period')
+    dt = datetime.timedelta(days=plot_period)
+    last_idx = int((end_d - start_d) / dt)
+    n_digits = len(str(last_idx))
+    video_path = os.path.abspath(os.path.join(output_dir,
+                                              tgt['video-filename']))
+    img_path = os.path.abspath(os.path.join(output_dir, 'img'))
+
+    # f/s = (d/s) / (d/f)
+    framerate = int(tgt.getint('days-per-sec') / plot_period)
+
+    cmd = [
+        'ffmpeg',
+        '-r', str(framerate),
+        '-i', f"%0{n_digits}d.png",
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        ]
+    if args.yes: cmd.append('-y')
+    cmd.append(video_path)
+    logging.info(f"  FFMPEG Command: {pprint.pformat(cmd)}")
+    subprocess.call(cmd, cwd=img_path)
