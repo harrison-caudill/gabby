@@ -110,14 +110,36 @@ class BStarPlotter(object):
         last_idx = int((end_d - start_d) / dt)
 
         # Fetch all the BStar values into RAM
-        Xt, bs, bounds, = self._fetch_bstar(txn,
-                                            scope_start, scope_end,
-                                            start_d, end_d, dt)
-
-        pprint.pprint(bounds)
+        Xt, Bs, = self._fetch_bstar(txn,
+                                    scope_start, scope_end,
+                                    start_d, end_d, dt)
+        self._plot_time_img(Xt, Bs)
 
         # FIXME
         sys.exit(0)
+
+    def _plot_time_img(self, Xt, Bs):
+        N = len(Bs)
+        L = len(Bs[0])
+        fig = plt.figure(figsize=(12, 8))
+        fig.set_dpi(self.tgt.getint('dpi'))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.set_yscale("log")
+
+        fig.suptitle(f"Mean/Std B* Values")
+        ax.set_ylabel("BStar")
+        ax.set_xlabel("Observation Date")
+
+        val = np.zeros(N, dtype=np.float32)
+        std = np.zeros(N, dtype=np.float32)
+        for i in range(N):
+            val[i] = np.mean(Bs[i])
+            std[i] = np.std(Bs[i])
+
+        low = np.where(val-std < 0, 0, val-std)
+        ax.fill_between(Xt, low, val+std, alpha=0.5, color='red')
+        ax.plot(Xt, val, color='black')
+        fig.savefig('wat.png')
 
     def _fetch_bstar(self,
                      txn,
@@ -172,9 +194,6 @@ class BStarPlotter(object):
         # Temporally-averaged B* values for each fragment
         Bs = np.zeros((N, L), dtype=np.float32)
 
-        # We'll want to find the zeros in this one
-        bounds = np.zeros((L, 2), np.int)
-
         # The big main loop
         for i in range(L):
             frag = fragments[i]
@@ -192,14 +211,7 @@ class BStarPlotter(object):
             prev_ts = start_ts + dt_s
             next_ts = prev_ts + dt_s
 
-            # Start by catching up to the start_ts
-            while True:
-                k, v, = cursor.item()
-                if not k.startswith(prefix): break
-                ts = int(k[-12:])
-                if ts >= start_ts: break
-                cursor.next()
-
+            k, v, = cursor.item()
             j = 0
             while True:
                 # Termination conditions for the inner (time) loop:
@@ -207,51 +219,36 @@ class BStarPlotter(object):
                 #  * We are beyond the time window of interest
                 if not k.startswith(prefix): break
                 ts = int(k[-12:])
+                if ts >= end_ts: break
 
-                # We use +1 here so that j=0 registers a truth value
-                # (1).  We can easily decrement this later.
-                if not bounds[i][0]: bounds[i][0] = j+1
-
-                # Cursor is behind
-                if ts < prev_ts:
+                # Since we start by seeking the cursor to the first
+                # key equal to or greater than the starting timestamp,
+                # we know that the first encountered timestamp will be
+                # >= prev_ts.  So if the current timestamp is less
+                # than next, we accumulate observations.
+                if ts < next_ts:
+                    prev_v += struct.unpack(TLE_STRUCT_FMT, v)[3]
+                    prev_n += 1
                     cursor.next()
                     k, v, = cursor.item()
 
-                # We're in the window -- accumulate
-                elif prev_ts < ts < next_ts:
-                    prev_ts = ts
-                    (n, ndot, nddot, bstar,
-                     tle_num, inc, raan, ecc,
-                     argp, mean_anomaly,
-                     rev_num) = struct.unpack(TLE_STRUCT_FMT, v)
-                    prev_v += bstar
-                    prev_n += 1
-
                 # Window is behind
                 else:
-                    prev_ts = next_ts
-                    next_ts += dt_s
+                    step = (ts - next_ts)//dt_s + 1
+                    prev_ts += step*dt_s
+                    next_ts += step*dt_s
 
                     # We aren't guaranteed to have accumulated anything
                     if prev_n:
                         # Record the average value
                         Bs[j][i] = prev_v / prev_n
 
-                        # Record the finish
-                        bounds[i][1] = j
-
                     # Whether or not we have data, moving the window
                     # means moving its index.
-                    j += 1
+                    j += step
 
                     # We reset unless we're between the targets
                     prev_v = 0
                     prev_n = 0
 
-                if ts >= end_ts: break
-
-        # We deliberately made these values be +1 earlier so that a 0
-        # would register as a truth value.  Now we decrement.
-        for i in range(len(bounds)): bounds[i][0] -= 1
-
-        return Xt, Bs, bounds
+        return Xt, Bs
