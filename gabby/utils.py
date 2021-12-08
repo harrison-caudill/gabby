@@ -1,5 +1,9 @@
 import os
+import lmdb
 import logging
+import struct
+
+from .defs import *
 
 def mkdir_p(path):
     """Emulates the functionality of mkdir -p
@@ -50,3 +54,30 @@ def setup_logging(log_file='output/gab.log', log_level='info'):
     ch = logging.StreamHandler()
     ch.setLevel(log_level)
     logging.getLogger().addHandler(ch)
+
+
+def load_scope(txn, db_scope, target_des):
+    logging.info(f"  Finding the scope of all fragments")
+    scope_start = {}
+    scope_end = {}
+    scope_cursor = txn.cursor(db=db_scope)
+    scope_cursor.first()
+    for des, scope in scope_cursor:
+        des = des.decode()
+        for prefix in target_des:
+            if des.startswith(prefix):
+                start, end = struct.unpack('ii', scope)
+                scope_start[des] = start
+                scope_end[des] = end
+    return scope_start, scope_end
+
+
+def load_dbs(obj, env, path):
+    if not env:
+        env = lmdb.Environment(path,
+                               max_dbs=len(DB_NAMES),
+                               map_size=int(DB_MAX_LEN))
+    obj.db_env = env
+    obj.db_tle = obj.db_env.open_db(DB_NAME_TLE.encode())
+    obj.db_apt = obj.db_env.open_db(DB_NAME_APT.encode())
+    obj.db_scope = obj.db_env.open_db(DB_NAME_SCOPE.encode())

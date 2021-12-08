@@ -1,0 +1,191 @@
+#!/usr/bin/env python
+
+"""Investigates the impacts of J2 on the APT(TLE) function.
+
+Using SGP4, we generate/import a series of TLEs to produce a
+sinusoidal numerical approximation of the J2 perturbation on the
+computation of the Apogee(A), Perigee(P), and Period(T) of an orbit
+when computed from the TLE.  We also assume a sinusoidal perturbation
+to a sphere for the purposes of computing distance-to-ground.
+"""
+
+import astropy
+import astropy.coordinates
+import astropy.units as u
+import copy
+import datetime
+import logging
+import math
+import numpy as np
+import poliastro
+import pprint
+import scipy
+import sgp4
+import sgp4.api
+import sys
+import tletools
+
+import gabby
+
+def tle_mean_anomaly(O):
+    """Computes the mean anomaly the TLE is actually expecting.
+
+    yeah...no clue...
+    """
+    nu = O.nu
+    M = true_to_mean(nu, O).to('deg').value
+    if (0 > M): M += 360
+    return M
+
+
+def true_to_mean(nu, orb):
+    """Just like it says, (nu, orbit) -> M as a Quantity.
+    """
+    E = poliastro.twobody.angles.nu_to_E(nu, orb.ecc)
+    M = poliastro.twobody.angles.E_to_M(E, orb.ecc).to('rad')
+    return M
+
+
+def run_trial(alt,
+              ecc,
+              inc,
+              raan,
+              argp,
+              nu,
+              epoch,
+              cat_num,
+              name):
+
+    # Start with the obvious and controlled poliastro orbit object
+    O = poliastro.twobody.orbit.Orbit.from_classical(
+        attractor=poliastro.bodies.Earth,
+        a=(poliastro.constants.R_earth + alt),
+        ecc=ecc*u.one,
+        inc=inc*u.rad,
+        raan=raan*u.rad,
+        argp=argp*u.rad,
+        nu=nu*u.rad,
+        epoch=astropy.time.Time(epoch))
+
+    # Since we have the [-pi, pi) range for poliastro but 0-360 for
+    # TLEs, break this part out into a helper function.
+    M = tle_mean_anomaly(O)
+
+    print("Building Orbit: name=%s nu=%.2f A=%d P=%d M=%d" % (
+        name,
+        nu/math.pi,
+        (O.r_a - poliastro.constants.R_earth).to('km').value,
+        (O.r_p - poliastro.constants.R_earth).to('km').value,
+        M))
+
+    # Orbits per day
+    n = ((1*u.d) / O.period).to('').value
+
+    # TLE Object
+    T = TLE(cat_number=cat_num,
+            epoch=epoch,
+            n=n,
+            inc=O.inc.to('deg').value,
+            raan=O.raan.to('deg').value,
+            ecc=O.ecc.value,
+            argp=O.argp.to('deg').value,
+            mean_anomaly=M,
+            name=name)
+
+
+    # The SGP4 library uses julian dates for timekeeping, so translate
+    # the epoch of the orbit into an absolute julian date
+    jd, fr = sgp4.api.jday(epoch.year,
+                           epoch.month,
+                           epoch.day,
+                           epoch.hour,
+                           epoch.minute,
+                           epoch.second)
+
+    # Run a (theoretically) 0-second propagation
+    sr = sgp4.api.Satrec.twoline2rv(*tuple(str(T).split('\n')[1:]))
+    _, r, v = sr.sgp4(jd, fr)
+    x, y, z, = r
+    r_mag = ((x**2 + y**2 + z**2)**.5*u.km - poliastro.constants.R_earth)
+    r_mag = r_mag.to('km').value
+
+    print("      Inc       Nu              x           y           z        ||r||")
+    calc = 'SGP4'
+    print("%s: %3.2f pi   %3.2f pi   %6dkm    %6dkm    %6dkm    %6dkm" % (
+        calc, inc/math.pi, nu/math.pi, x, y, z, r_mag))
+
+    # Poliastro is expecting this:
+    # Z: parallel to Earth's axis
+    # Y: Through the Ascending Node
+    # X: Equatorial projection of (peri|apo)apsis
+
+    # Try running a conversion from TEME to ITRS
+    tm = astropy.time.Time(epoch)
+    t_p = astropy.coordinates.CartesianRepresentation(r*u.km)
+    t_v = astropy.coordinates.CartesianDifferential(v*u.km/u.s)
+    teme = astropy.coordinates.TEME(t_p.with_differentials(t_v), obstime=tm)
+    itrs = teme.transform_to(astropy.coordinates.ITRS(obstime=tm))
+    X, Y, Z, = itrs.cartesian.xyz.value
+    calc = 'ITRS'
+    print("%s: %3.2f pi   %3.2f pi   %6dkm    %6dkm    %6dkm    %6dkm" % (
+        calc, inc/math.pi, nu/math.pi, X, Y, Z, r_mag))
+
+    # Try running a conversion from TEME to GCRS
+    gcrs = teme.transform_to(astropy.coordinates.GCRS(obstime=tm))
+    X, Y, Z, = itrs.cartesian.xyz.value
+    calc = 'GCRS'
+    print("%s: %3.2f pi   %3.2f pi   %6dkm    %6dkm    %6dkm    %6dkm" % (
+        calc, inc/math.pi, nu/math.pi, X, Y, Z, r_mag))
+
+    # Try running a conversion from TEME to ICRS
+    icrs = teme.transform_to(astropy.coordinates.ICRS())
+    X, Y, Z, = itrs.cartesian.xyz.value
+    calc = 'ICRS'
+    print("%s: %3.2f pi   %3.2f pi   %6dkm    %6dkm    %6dkm    %6dkm" % (
+        calc, inc/math.pi, nu/math.pi, X, Y, Z, r_mag))
+
+    # Try creating an orbit first using from_vector with the same epoch
+    O_vec = poliastro.twobody.orbit.Orbit.from_vectors(
+        poliastro.bodies.Earth,
+        r * u.km,
+        v * u.km/u.s,
+        epoch=tm)
+    X, Y, Z, = O_vec.r.to('km').value
+    calc = 'OVec'
+    print("%s: %3.2f pi   %3.2f pi   %6dkm    %6dkm    %6dkm    %6dkm" % (
+        calc, inc/math.pi, nu/math.pi, X, Y, Z, r_mag))
+
+    X, Y, Z, = O.r.to('km').value
+    calc = 'Poli'
+    print("%s: %3.2f pi   %3.2f pi   %6dkm    %6dkm    %6dkm    %6dkm" % (
+        calc, inc/math.pi, nu/math.pi, X, Y, Z, r_mag))
+    print()
+
+    return T
+
+
+if __name__ == '__main__':
+
+    logging.basicConfig(level=logging.INFO)
+
+    epoch = datetime.datetime.utcnow()
+
+    fd = open('/Users/kungfoo/freewander.tle', 'w')
+
+    nus = np.arange(-1.0 * math.pi, math.pi, math.pi/4.0)
+    incs = np.arange(0.0, 1.25*math.pi, math.pi/4.0)
+
+    for i in range(len(nus)):
+        for j in range(len(incs)):
+            alt = 2500*u.km
+            ecc = 0.2
+            inc = incs[j]
+            raan = 0
+            argp = 1.0*math.pi
+            nu = nus[i]
+            cat_num = 73000 + i*len(incs)+j
+            name = "revenge-%d%d" % (i, j)
+
+            T = run_trial(alt, ecc, inc, raan, argp, nu, epoch, cat_num, name)
+            msg = "%s\n" % str(T)
+            fd.write(msg)

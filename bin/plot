@@ -14,7 +14,65 @@ import gabby
 
 
 if __name__ == '__main__':
-    desc = """Produces the plots that will be used for the animations.
+    desc = """Plots debris data in various fun ways.
+
+ Because this process involves a stupid amount of work, it is set up
+ to use python's multiprocessing library under the hood.  Pass in the
+ number of independent processes with the -n switch.  I recommend N-1
+ where N is the number of independent threads your CPU(s) can run
+ (AFTER hyperthreading).
+
+ The config file is where we stash all of the parameters for the plots
+ themselves, rather than try to fit everything onto a command line
+
+ * gabby: Animated/static Gabbard plot with number of fragments
+ * bstar: Animated/static frequency histograms of B* values
+
+
+  =============================================================================
+  == Gabby Plots                                                             ==
+  =============================================================================
+
+
+  Overall plot structure:
+  +---------------------------------------------------------------------------+
+  |                                  +                                        |
+  |                                +                                          |
+  |                              +                                            |
+  |                            +                                              |
+  |                      + + + + + + +                                        |
+  |                          +                                                |
+  |                        +                                                  |
+  |                      +                                                    |
+  +---------------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------------+
+  |                                                                           |
+  |     -----.                                                                |
+  |    /      -                                                               |
+  |   |                                                                       |
+  |  /                                                                        |
+  | |                                                                         |
+  | |                                                                         |
+  +---------------------------------------------------------------------------+
+
+  Output Files:
+
+  <output_dir>/<profile-name>/gabby_img/0000.png
+  <output_dir>/<profile-name>/gabby_img/0001.png
+  ...
+  <output_dir>/<profile-name>/gabby_img/%*.*d.png % (log10(N), log10(N), N)
+
+  So, it will adjust the number of digits in the name according to the
+  number of fragments you have.
+
+
+  =============================================================================
+  == BStar Plots                                                             ==
+  =============================================================================
+
+  No, I don't have a fun ascii-art version of this.
+
     """
 
     formatter = argparse.RawTextHelpFormatter
@@ -27,7 +85,7 @@ if __name__ == '__main__':
                         dest='db_path',
                         required=False,
                         type=str,
-                        default='tle.db',
+                        default='output/tle.db',
                         help='Location of the lmdb (%(default)s)')
 
     parser.add_argument('--config-file', '-c',
@@ -48,6 +106,16 @@ if __name__ == '__main__':
                         default='shakti',
                         help='The ASAT to build video for (%(default)s)')
 
+    parser.add_argument('--plot-type', '-T',
+                        metavar='PLOT_TYPE',
+                        action='store',
+                        dest='plot_type',
+                        type=str,
+                        default='gabby',
+                        choices=['gabby',
+                                 'bstar'],
+                        help='Which plot type to build (%(default)s)')
+
     parser.add_argument('--num-threads', '-n',
                         metavar='NUM_THREADS',
                         action='store',
@@ -65,15 +133,6 @@ if __name__ == '__main__':
                         type=str,
                         default='output/%(tgt)s',
                         help='Output directory (%(default)s)',)
-
-    parser.add_argument('--staging-directory', '-s',
-                        metavar='STAGING_DIR',
-                        action='store',
-                        dest='staging_dir',
-                        required=False,
-                        type=str,
-                        default='staging',
-                        help='Staging directory (%(default)s)',)
 
     parser.add_argument('--clean', '-C',
                         action='store_true',
@@ -125,24 +184,35 @@ if __name__ == '__main__':
     cfg.read(args.cfg)
 
     # Find the target
-    tgt = cfg['gabby-'+args.tgt]
+    tgt = cfg[args.plot_type+'-'+args.tgt]
 
     # Disable interactive mode in matplotlib to speed up plot
     # generation and save memory
     plt.ioff()
     matplotlib.use('TkAgg')
 
-    img_dir = os.path.join(output_dir, "img")
+    img_dir = os.path.join(output_dir, args.plot_type+'-img')
     if args.clean and os.path.isdir(img_dir):
         shutil.rmtree(img_dir)
 
-    # Let the conspiracy commence!
     db_path = args.db_path % arg_dict
-    plotter = gabby.Conspirator(cfg=cfg['general'],
-                                tgt=tgt,
-                                output_dir=output_dir,
-                                staging_dir=args.staging_dir,
-                                db_path=db_path)
-    logging.info("The Plotter has arrived!")
 
-    plotter.plot(n_threads=args.n_threads)
+    if args.plot_type == 'gabby':
+        plotter = gabby.GabbyPlotter(cfg=cfg['general'],
+                                     tgt=tgt,
+                                     output_dir=output_dir,
+                                     img_dir=img_dir,
+                                     db_path=db_path)
+        plotter.plot(n_threads=args.n_threads)
+
+    elif args.plot_type == 'bstar':
+        plotter = gabby.BStarPlotter(cfg=cfg['general'],
+                                     tgt=tgt,
+                                     output_dir=output_dir,
+                                     img_dir=img_dir,
+                                     db_path=db_path)
+        plotter.plot(n_threads=args.n_threads)
+
+    else:
+        logging.critical(f"WHAT DID YOU DO??? {args.plot_type}")
+

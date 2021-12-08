@@ -158,19 +158,17 @@ def _plot_image(arg):
         gc.collect()
 
 
-class Conspirator(object):
+class GabbyPlotter(object):
 
     def __init__(self,
                  cfg=None,
                  tgt=None,
-                 staging_dir=None,
                  output_dir=None,
                  db_path=None,
                  db_env=None):
         self.cfg = cfg
         self.tgt = tgt
         self.output_dir = output_dir
-        self.staging_dir = staging_dir
         self.db_path = db_path
 
         if db_env: self.db_env = db_env
@@ -209,7 +207,7 @@ class Conspirator(object):
 
         # We're going to store the images in a separate directory for
         # cleanliness
-        img_dir = os.path.join(self.output_dir, "img")
+        img_dir = os.path.join(self.output_dir, "gabby-img")
 
         target_des = self.tgt['intldes'].strip().split(',')
         target_des = [s.strip() for s in target_des]
