@@ -28,3 +28,5 @@ def fmt_key(ts, des):
 # mean_anomaly  f  Mean anomaly (phase in deg)
 # rev_num       i  Number of orbits from epoch at time of observation
 TLE_STRUCT_FMT = "ffffifffffi"
+
+APT_STRUCT_FMT = "fff"

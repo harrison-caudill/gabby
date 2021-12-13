@@ -14,6 +14,7 @@ import struct
 import sys
 import tletools
 import scipy
+import scipy.interpolate
 import scipy.signal
 
 from .defs import *
@@ -36,32 +37,17 @@ to be crowded:
 
 For the moment, we're still going to do uniform spacing of bins at
 roughly 1km intervals which is assumed to be the materiality threshold.
-
 """
 
 
 class Jazz(object):
 
-    def __init__(self,
-                 cfg,
-                 db_path,
-                 db_env=None):
-
-        # Preserve the basic inputs
-        self.db_path = db_path
+    def __init__(self, cfg, env, apt, tle, scope):
         self.cfg = cfg
-
-        # Build the DB handles
-        if db_env: self.db_env = db_env
-        else: self.db_env = lmdb.Environment(self.db_path,
-                                             max_dbs=len(DB_NAMES),
-                                             map_size=int(DB_MAX_LEN))
-        self.db_gabby = self.db_env.open_db(DB_NAME_GABBY.encode(),
-                                            dupsort=False)
-        self.db_idx = self.db_env.open_db(DB_NAME_IDX.encode(),
-                                          dupsort=False)
-        self.db_scope = self.db_env.open_db(DB_NAME_SCOPE.encode(),
-                                            dupsort=False)
+        self.db_env = env
+        self.db_apt = apt
+        self.db_tle = tle
+        self.db_scope = scope
 
     def _prior_des(self):
         # Find the prior ASATs to use for producing the histograms
@@ -128,7 +114,7 @@ class Jazz(object):
                     start_reg[frag] = start
                     end_reg[frag] = end
 
-                    apt_bytes = txn.get(fmt_key(start, frag), db=self.db_gabby)
+                    apt_bytes = txn.get(fmt_key(start, frag), db=self.db_apt)
                     a, p, t, = struct.unpack('fff', apt_bytes)
 
                     a_reg[frag] = a
@@ -217,232 +203,283 @@ class Jazz(object):
         finally:
             if txn: txn.commit()
 
-    def derivatives(self,
-                    step_A=1, step_P=1, step_T=1,
-                    step_dA=.1, step_dP=.1, step_dT=.001,
-                    min_life=1.0):
-        """Finds the derivatives of A, P, and T.
 
-        step_A: km
-        step_P: km
-        step_T: minutes
-        min_life: only consider fragments with a minimum lifetime (days)
+    def resample(self, X, Y, dx, sub='linear'):
+        """Resamples the aperiodic signal to periodic sampling.
+
+        The TLE observations are aperiodic, but most of the cool
+        signal processing routines assume a regularly-sampled signal.
+        """
+        Xr = np.arange(X[0], X[-1], dx, dtype=X.dtype)
+
+        if sub == 'cubic':
+            f = scipy.interpolate.interp1d(X, Y, kind='cubic')
+            Yr = f(Xr)
+        else:
+            Yr = np.interp(Xr, X, Y)
+
+        return Xr, Yr
+
+    def lpf(self):
+        k = 10000
+        n_taps = 127
+        fltr = np.arange(-1*(n_taps//2), n_taps//2+1, 1) * np.pi / k
+        fltr = (1/k) * np.sinc(fltr)
+        fltr /= np.sum(fltr)
+        return fltr
+
+    def derivatives(self,
+                    dP=1,
+                    min_life=1.0,
+                    dt=SECONDS_IN_DAY,
+                    fltr=None,
+                    cache_dir=None):
+        """Finds A'(P), and P'(P)
         """
 
-        logging.info(f"Finding derivatives")
+        if cache_dir:
+            cache_data_path = os.path.join(cache_dir, "deriv_data.np")
+            cache_meta_path = os.path.join(cache_dir, "deriv_meta.pickle")
+            if os.path.exists(cache_data_path):
+                with open(cache_data_path, 'rb') as fd:
+                    logging.info(f"Loading derivatives from: {cache_data_path}")
+                    pos = np.load(fd)
+                    deriv = np.load(fd)
+                    N = np.load(fd)
+                with open(cache_meta_path, 'rb') as fd:
+                    meta = pickle.load(fd)
+                return meta['fragments'], pos, deriv, N
 
-        prior_des = self._prior_des()
-
-        logging.info(f"  Listing fragments and their scopes")
+        start_time = datetime.datetime.now()
 
         # Only need a read-only transaction for this
-        txn = lmdb.Transaction(self.db_env, write=True)
-        try:
+        txn = lmdb.Transaction(self.db_env, write=False)
 
-            # designator => <int> timestamp when it comes into scope
-            start_reg = {}
+        base_des = self._prior_des()
+        fragments = find_daughter_fragments(base_des, txn, self.db_scope)
 
-            # designator => <int> timestamp when it goes out of scope
-            end_reg = {}
+        L = len(fragments)
 
-            # designator => <float> value when it comes into scope (init val)
-            A_reg = {}
-            P_reg = {}
-            T_reg = {}
+        logging.info(f"Finding derivatives for {L} fragments")
 
-            # Cursor to walk the scope DB
-            scope_cur = txn.cursor(db=self.db_scope)
+        # Load the APT values for all of the prior fragments
+        to, Ao, Po, To, No = load_apt(fragments, txn, self.db_apt,
+                                      cache_dir=cache_dir)
+        logging.info(f"  Finished loading APT values")
 
-            # Find the scope of all fragments of concern
-            for satellite in prior_des:
-                scope_cur.set_range(satellite.encode())
-                for k, v in scope_cur:
-                    frag = k.decode()
-                    if satellite not in frag: break
+        # (p)repared values
+        tp = []
+        Ap = []
+        Pp = []
+        Tp = []
+        Np = np.zeros(L, dtype=np.int)
 
-                    start, end, = struct.unpack('ii', v)
+        for i in range(L):
 
-                    life = end - start
+            # (r)esampled
+            Nr = No[i]
+            tr, Ar = self.resample(to[i][:Nr], Ao[i][:Nr], dt)
+            tr, Pr = self.resample(to[i][:Nr], Po[i][:Nr], dt)
+            tr, Tr = self.resample(to[i][:Nr], To[i][:Nr], dt)
+            Nr = len(tr)
 
-                    # We ignore single-observation fragments
-                    if life < min_life*24*3600: continue
+            if fltr is not None and Nr > len(fltr):
+                tr = tr[len(fltr)//2:-1*(len(fltr)//2)]
+                Ar = np.convolve(Ar, fltr, mode='valid')
+                Pr = np.convolve(Pr, fltr, mode='valid')
+                Tr = np.convolve(Tr, fltr, mode='valid')
+                Nr = len(tr)
 
-                    start_reg[frag] = start
-                    end_reg[frag] = end
+            tp.append(tr)
+            Ap.append(Ar)
+            Pp.append(Pr)
+            Tp.append(Tr)
+            Np[i] = Nr
 
-                    apt_bytes = txn.get(fmt_key(start, frag), db=self.db_gabby)
-                    A, P, T, = struct.unpack('fff', apt_bytes)
+            if 0 == L%1000:
+                logging.info("  Resampled and filtered {i} fragments")
 
-                    A_reg[frag] = A
-                    P_reg[frag] = P
-                    T_reg[frag] = T
+        # Find the actual (d)erivatives and put all the filtered
+        # values into a single numpy array
+        N = np.where(Np > 0, Np-1, 0)
+        ret_filtered = np.zeros((L, 4, np.max(Np)-1), dtype=np.float32)
+        for i in range(L):
+            ret_filtered[i][0][:N[i]] = tp[i][1:]
+            ret_filtered[i][1][:N[i]] = Ap[i][1:]
+            ret_filtered[i][2][:N[i]] = Pp[i][1:]
+            ret_filtered[i][3][:N[i]] = Tp[i][1:]
+        ret_deriv = np.zeros((L, 4, np.max(Np)-1), dtype=np.float32)
+        for i in range(L):
+            ret_deriv[i][0][:N[i]] = tp[i][1:]
+            ret_deriv[i][1][:N[i]] = np.diff(Ap[i]) / dt
+            ret_deriv[i][2][:N[i]] = np.diff(Pp[i]) / dt
+            ret_deriv[i][3][:N[i]] = np.diff(Tp[i]) / dt
 
-            # Number of fragments we're looking at
-            Nf = len(A_reg)
-            assert(len(start_reg) == len(end_reg) == len(P_reg) == len(T_reg))
-            logging.info(f"  Found {Nf} compliant fragments")
+        end_time = datetime.datetime.now()
 
-            # The primary reason we need the apogee and perigee is to
-            # determine the effective range of our histogram.  We
-            # should probably NOT do it this way, because data quality
-            # issues can get some pretty whacked-out values which
-            # could lead to the bins being too tightly packed unless
-            # we do equally-weighted bins (in which case we have
-            # another problem).
-            min_A = min([A_reg[k] for k in A_reg])
-            max_A = max([A_reg[k] for k in A_reg])
-            min_P = min([P_reg[k] for k in P_reg])
-            max_P = max([P_reg[k] for k in P_reg])
-            min_T = min([T_reg[k] for k in T_reg])
-            max_T = max([T_reg[k] for k in T_reg])
+        elapsed = int((end_time-start_time).seconds * 10)/10.0
+        logging.info(f"  Finished finding derivatives in {elapsed} seconds")
 
-            # Compute the entire set of derivatives.  This set will be
-            # quite large (on the order of 100m entries).
-            logging.info(f"  Computing derivatives")
-            index_cur = txn.cursor(db=self.db_idx)
-            gabby_cur = txn.cursor(db=self.db_gabby)
-            derivatives = {}
-
-            tmp_t = np.zeros(40*365*2, dtype=np.int32)
-            tmp_A = np.zeros(40*365*2, dtype=np.float32)
-            tmp_P = np.zeros(40*365*2, dtype=np.float32)
-            tmp_T = np.zeros(40*365*2, dtype=np.float32)
-
-            # Here we go
-            N = 0
-            for frag in A_reg:
-                logging.info(f"  Investigating fragment: {frag}")
-                index_cur.set_range(frag.encode())
-                off = len(frag)+1
-                idx = 0
-                des = (frag+',').encode()
-                
-                for k, v in index_cur:
-                    if not k.startswith(des): break
-                    cur_t = int(k[off:])
-                    cur_A, cur_P, cur_T, = struct.unpack('fff', v)
-
-                    tmp_t[idx] = cur_t
-                    tmp_A[idx] = cur_A
-                    tmp_P[idx] = cur_P
-                    tmp_T[idx] = cur_T
-
-                    idx += 1
-                # Done with this fragment
-
-                # Use numpy to parallelize the computation of the
-                # differentials
-                t = tmp_t[:idx]
-                A = tmp_A[:idx]
-                P = tmp_P[:idx]
-                T = tmp_T[:idx]
-
-                dt = np.diff(t)
-                dA = np.diff(A)
-                dP = np.diff(P)
-                dT = np.diff(T)
-
-                A = (A[:-1] + A[1:])/2
-                P = (P[:-1] + P[1:])/2
-                T = (T[:-1] + T[1:])/2
-
-                dAdt = dA/dt
-                dPdt = dP/dt
-                dTdt = dT/dt
-                derivatives[frag] = {
-                    't': t,
-                    'A': A,
-                    'P': P,
-                    'T': T,
-                    'dt': dt,
-                    'dA': dA,
+        # Cache the values
+        if cache_dir:
+            cache_data_path = os.path.join(cache_dir, "deriv_data.np")
+            cache_meta_path = os.path.join(cache_dir, "deriv_meta.pickle")
+            with open(cache_data_path, 'wb') as fd:
+                logging.info(f"Saving derivatives to: {cache_data_path}")
+                np.save(fd, ret_filtered)
+                np.save(fd, ret_deriv)
+                np.save(fd, N)
+            with open(cache_meta_path, 'wb') as fd:
+                meta = {
                     'dP': dP,
-                    'dT': dT,
-                    'dAdt': dAdt,
-                    'dPdt': dPdt,
-                    'dTdt': dTdt,
+                    'min_life': min_life,
+                    'dt': dt,
+                    'fltr': fltr,
+                    'base': base_des,
+                    'fragments': fragments,
                     }
-                N += idx
-            # Done with the big loop
+                pickle.dump(meta, fd)
 
-            # Find the min and max values
-            max_dAdt = min_dAdt = derivatives[frag]['dAdt'][0]
-            max_dPdt = min_dPdt = derivatives[frag]['dPdt'][0]
-            max_dTdt = min_dTdt = derivatives[frag]['dTdt'][0]
-            max_A = min_A = derivatives[frag]['A'][0]
-            max_P = min_P = derivatives[frag]['P'][0]
-            max_T = min_T = derivatives[frag]['T'][0]
-            for frag in derivatives:
-                max_dAdt = min(max(max_dAdt,
-                                   np.max(derivatives[frag]['dAdt'])),
-                               0)
+        retval = (fragments, ret_filtered, ret_deriv, N)
+        return retval
 
-                min_dAdt = min(min_dAdt, np.min(derivatives[frag]['dAdt']))
+    def decay_rates(self,
+                    positions,
+                    derivatives,
+                    Ns,
+                    ignore_frac=.01,
+                    n_A_bins=100,
+                    n_P_bins=100,
+                    n_D_bins=100,
+                    min_apogee=150,
+                    max_apogee=1500,
+                    min_perigee=100,
+                    max_perigee=1000):
 
-                max_dPdt = min(max(max_dPdt,
-                                   np.max(derivatives[frag]['dPdt'])),
-                               0)
-                min_dPdt = min(min_dPdt, np.min(derivatives[frag]['dPdt']))
+        N = np.sum(Ns)
+        logging.info(f"Quantifying Moral Decay from {N} samples")
 
-                max_dTdt = min(max(max_dTdt,
-                                   np.max(derivatives[frag]['dTdt'])),
-                               0)
-                min_dTdt = min(min_dTdt, np.min(derivatives[frag]['dTdt']))
+        # FIXME: Any normalization steps for things like B* compared
+        # to mean would happen at this stage.
 
-                max_A = min(max(max_A, np.max(derivatives[frag]['A'])), 0)
-                min_A = min(min_A, np.min(derivatives[frag]['A']))
+        # We don't care about fragment separation so just concatenate
+        # everything
+        L = len(positions)
+        Ap = np.zeros(N, dtype=np.float32)
+        Pp = np.zeros(N, dtype=np.float32)
+        Ad = np.zeros(N, dtype=np.float32)
+        Pd = np.zeros(N, dtype=np.float32)
+        j = 0
+        for i in range(L):
+            Ap[j:j+Ns[i]] = positions[i][1][:Ns[i]]
+            Pp[j:j+Ns[i]] = positions[i][2][:Ns[i]]
+            Ad[j:j+Ns[i]] = derivatives[i][1][:Ns[i]]
+            Pd[j:j+Ns[i]] = derivatives[i][2][:Ns[i]]
+            j += Ns[i]
 
-                max_P = min(max(max_P, np.max(derivatives[frag]['P'])), 0)
-                min_P = min(min_P, np.min(derivatives[frag]['P']))
+        logging.info("  Partitioning derivatives")
+        start = datetime.datetime.now().timestamp()
+        n_skip = int(ignore_frac * np.sum(N))
+        Ad_part = np.partition(Ad, n_skip)
+        Ad_min = Ad[n_skip]
+        Ad_part = np.partition(Ad, N-n_skip)
+        Ad_max = Ad[N-n_skip]
 
-                max_T = min(max(max_T, np.max(derivatives[frag]['T'])), 0)
-                min_T = min(min_T, np.min(derivatives[frag]['T']))
+        Pd_part = np.partition(Pd, n_skip)
+        Pd_min = Pd[n_skip]
+        Pd_part = np.partition(Pd, N-n_skip)
+        Pd_max = Pd[N-n_skip]
+        end = datetime.datetime.now().timestamp()
 
-            logging.info(f"  Total number of observations {N}")
-            logging.info(f"  max_dAdt: {max_dAdt}")
-            logging.info(f"  min_dAdt: {min_dAdt}")
-            logging.info(f"  max_dPdt: {max_dPdt}")
-            logging.info(f"  min_dPdt: {min_dPdt}")
-            logging.info(f"  max_dTdt: {max_dTdt}")
-            logging.info(f"  min_dTdt: {min_dTdt}")
+        logging.info("  Clipping the derivative arrays")
+        Ad_step = (Ad_max-Ad_min)/(n_D_bins-1) # n_bins, not n_steps
+        Pd_min = Pd[n_skip]
+        Pd_max = Pd[-1*n_skip]
+        Pd_step = (Pd_max-Pd_min)/(n_D_bins-1) # n_bins, not n_steps
+        # Place all ignored values into flanking bins
+        Ad = np.clip(Ad, Ad_min-Ad_step, Ad_max+Ad_step)
+        Pd = np.clip(Pd, Pd_min-Pd_step, Pd_max+Pd_step)
 
-            logging.info(f"  Collating the derivatives in their bins")
-            nA = int(math.ceil(abs(max_A-min_A)/step_A))
-            nP = int(math.ceil(abs(max_P-min_P)/step_P))
-            nT = int(math.ceil(abs(max_T-min_T)/step_T))
-            ndA = int(math.ceil(abs(max_dAdt-min_dAdt)/step_dA))
-            ndP = int(math.ceil(abs(max_dPdt-min_dPdt)/step_dP))
-            ndT = int(math.ceil(abs(max_dTdt-min_dTdt)/step_dT))
-            
-            ret_A = np.zeros((nA, nP, ndA), dtype=np.int32)
-            ret_P = np.zeros((nA, nP, ndP), dtype=np.int32)
-            ret_T = np.zeros((nA, nP, ndT), dtype=np.int32)
+        logging.info("  Clipping the Apogee/Perigee arrays")
+        A_min = min_apogee
+        A_max = max_apogee
+        P_min = min_perigee
+        P_max = max_perigee
+        P_step = (P_max-P_min)/(n_P_bins-1)
+        A_step = (A_max-A_min)/(n_A_bins-1)
+        Ap = np.clip(Ap, A_min-A_step*.9, A_max+A_step*.9)
+        Pp = np.clip(Pp, P_min-P_step*.9, P_max+P_step*.9)
 
-            for frag in derivatives:
-                cur = derivatives[frag]
-                off_A = cur['A'] - min_A
-                off_P = cur['P'] - min_P
-                off_T = cur['T'] - min_T
-                off_dA = cur['dA'] - min_dAdt
-                off_dP = cur['dP'] - min_dPdt
-                off_dT = cur['dT'] - min_dTdt
-                for i in range(0, len(cur['dA'])):
+        logging.info("  Discretizing the bin numbers")
+        Ap = (Ap - min_apogee) / A_step
+        Ad = (Ad - Ad_min) / Ad_step
+        Pp = (Pp - min_perigee) / P_step
+        Pd = (Pd - Pd_min) / Pd_step
 
-                    idx_A = min(max(off_A[i]/step_A, 0), nA-1)
-                    idx_P = min(max(off_P[i]/step_P, 0), nP-1)
-                    idx_T = min(max(off_T[i]/step_T, 0), nT-1)
+        # We add one so that they are valid indices into an array
+        Ap = np.round(Ap, decimals=0).astype(np.int) + 1
+        Ad = np.round(Ad, decimals=0).astype(np.int) + 1
+        Pp = np.round(Pp, decimals=0).astype(np.int) + 1
+        Pd = np.round(Pd, decimals=0).astype(np.int) + 1
 
-                    idx_dA = min(max(off_dA[i]/step_dA, 0), nA-1)
-                    idx_dP = min(max(off_dP[i]/step_dP, 0), nP-1)
-                    idx_dT = min(max(off_dT[i]/step_dT, 0), nT-1)
+        logging.info("  Constructing a sorted universal key/value int64")
+        # <bin-A><bin-P><derivative-bin>
 
-                    ret_A[idx_A][idx_P][idx_dA] += 1
-                    ret_P[idx_P][idx_P][idx_dP] += 1
-                    ret_T[idx_T][idx_P][idx_dT] += 1
+        start = datetime.datetime.now().timestamp()
+        bits_A = int(math.ceil(math.log(n_A_bins, 2)))
+        bits_P = int(math.ceil(math.log(n_P_bins, 2)))
+        bits_D = int(math.ceil(math.log(n_D_bins, 2)))
+        univ = np.zeros(N, dtype=np.int64)
+        univ += Ap
+        univ *= 2**bits_P
+        univ += Pp
+        univ *= 2**bits_D
+        univ_A = univ + Ad
+        univ_P = univ + Pd
 
-                break
-            
-            return derivatives, ret_A, ret_P, ret_T
+        end = datetime.datetime.now().timestamp()
+        logging.info(f"    Universalizing took: {int((end-start)*1000)}ms")
 
-        finally:
-            if txn: txn.commit()
+        start = datetime.datetime.now().timestamp()
+        np.sort(univ_A)
+        np.sort(univ_P)
+        end = datetime.datetime.now().timestamp()
+        logging.info(f"    Sorting that took: {int((end-start)*1000)}ms")
+
+        logging.info("  Indexing")
+        start = datetime.datetime.now().timestamp()
+        index = np.zeros((2, n_A_bins+2, n_P_bins+2, n_D_bins+2), dtype=np.int)
+        for i in range(n_A_bins+2):
+            for j in range(n_P_bins+2):
+                for k in range(n_D_bins+2):
+                    srch = (i)<<(bits_P+bits_D) | (j)<<bits_D | k
+                    index[0][i][j][k] = np.searchsorted(univ_A, srch)
+                    index[1][i][j][k] = np.searchsorted(univ_P, srch)
+        end = datetime.datetime.now().timestamp()
+        logging.info(f"    Indexing took: {int((end-start)*1000)}ms")
+
+        logging.info("  Binning")
+        start = datetime.datetime.now().timestamp()
+
+        retval = np.zeros((2, n_A_bins, n_P_bins, n_D_bins),
+                       dtype=np.float32)
+
+        for i in range(1, n_A_bins+1, 1):
+            for j in range(1, n_P_bins+1, 1):
+                tot_A = 0.0
+                tot_P = 0.0
+                for k in range(2, n_D_bins+2, 1):
+                    cur = index[0][i][j][k] - index[0][i][j][k-1]
+                    retval[0][i-1][j-1][k-2] = cur
+                    tot_A += cur
+                    cur = index[1][i][j][k] - index[1][i][j][k-1]
+                    retval[1][i-1][j-1][k-2] = cur
+                    tot_P += cur
+                if tot_A: retval[0][i-1][j-1] /= tot_A
+                if tot_P: retval[1][i-1][j-1] /= tot_P
+        end = datetime.datetime.now().timestamp()
+        logging.info(f"    Binning took: {int((end-start)*1000)}ms")
+
+        bins_A = np.linspace(Ad_min, Ad_max, n_D_bins)
+        bins_P = np.linspace(Pd_min, Pd_max, n_D_bins)
+        return retval, bins_A, bins_P

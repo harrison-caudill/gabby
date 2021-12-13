@@ -1,6 +1,9 @@
 import os
 import lmdb
 import logging
+import numpy as np
+import pickle
+import pprint
 import struct
 
 from .defs import *
@@ -72,12 +75,157 @@ def load_scope(txn, db_scope, target_des):
     return scope_start, scope_end
 
 
-def load_dbs(obj, env, path):
-    if not env:
-        env = lmdb.Environment(path,
-                               max_dbs=len(DB_NAMES),
-                               map_size=int(DB_MAX_LEN))
-    obj.db_env = env
-    obj.db_tle = obj.db_env.open_db(DB_NAME_TLE.encode())
-    obj.db_apt = obj.db_env.open_db(DB_NAME_APT.encode())
-    obj.db_scope = obj.db_env.open_db(DB_NAME_SCOPE.encode())
+def load_dbs(obj, full_path, frag_path):
+    full_env = lmdb.Environment(full_path,
+                                max_dbs=len(DB_NAMES),
+                                map_size=int(DB_MAX_LEN))
+    obj.full_env = full_env
+    obj.full_tle = obj.full_env.open_db(DB_NAME_TLE.encode())
+    obj.full_apt = obj.full_env.open_db(DB_NAME_APT.encode())
+    obj.full_scope = obj.full_env.open_db(DB_NAME_SCOPE.encode())
+
+    frag_env = lmdb.Environment(frag_path,
+                                max_dbs=len(DB_NAMES),
+                                map_size=int(DB_MAX_LEN))
+    obj.frag_env = frag_env
+    obj.frag_tle = obj.frag_env.open_db(DB_NAME_TLE.encode())
+    obj.frag_apt = obj.frag_env.open_db(DB_NAME_APT.encode())
+    obj.frag_scope = obj.frag_env.open_db(DB_NAME_SCOPE.encode())
+
+def find_daughter_fragments(base, txn, db_scope):
+    retval = []
+    cursor = txn.cursor(db=db_scope)
+    for sat in base:
+        prefix = sat.encode()
+        cursor.set_range(prefix)
+        for k, v in cursor:
+            if not k.startswith(prefix): break
+            retval.append(k.decode().split(',')[0])
+    return retval
+
+
+def load_apt(fragments, txn, db_apt, cache_dir=None):
+    """Loads the APT values from the DB.
+    """
+
+    if cache_dir:
+        cache_data_path = os.path.join(cache_dir, "apt_data.np")
+        if os.path.exists(cache_data_path):
+            with open(cache_data_path, 'rb') as fd:
+                logging.info(f"Loading APT from: {cache_data_path}")
+                t = np.load(fd)
+                A = np.load(fd)
+                P = np.load(fd)
+                T = np.load(fd)
+                n_apt = np.load(fd)
+                return t, A, P, T, n_apt
+
+    # Initialize our main cursor
+    cursor = txn.cursor(db=db_apt)
+
+    # numpy dimensions
+    L = len(fragments)
+    N = 1024
+
+    # Keep track of the number of TLEs we find per fragment
+    n_apt = np.zeros(L, dtype=np.int)
+
+    # Use a regular python array, initially
+    As = []
+    Ps = []
+    Ts = []
+    ts = []
+
+    logging.info(f"Loading APT for {L} fragments")
+
+    for i in range(L):
+        des = fragments[i]
+
+        # Number of observations for this fragment
+        n = 0
+
+        # Seek to the beginning of the fragment in the table
+        prefix = f"{des},".encode()
+        cursor.set_range(prefix)
+        off = len(prefix)
+
+        # Stash the current round here
+        M = N
+        A = np.zeros(M, dtype=np.float32)
+        P = np.zeros(M, dtype=np.float32)
+        T = np.zeros(M, dtype=np.float32)
+        t = np.zeros(M, dtype=np.int)
+
+        # Loop through the DB
+        j = 0
+        for k, v in cursor:
+            if not k.startswith(prefix): break
+            A[j], P[j], T[j] = struct.unpack(APT_STRUCT_FMT, v)
+            t[j] = int(k[off:])
+            j += 1
+
+            # We may need to expand our arrays
+            if j >= M:
+                M *= 2
+                t.resize(M)
+                A.resize(M)
+                P.resize(M)
+                T.resize(M)
+
+        # Update our global max
+        N = max(N, j)
+
+        # Store our local results
+        n_apt[i] = j
+        As.append(A)
+        Ps.append(P)
+        Ts.append(T)
+        ts.append(t)
+
+        # Numpy resize borks if there are other python references, so
+        # we have to clear these.  The arrays above will still hold a
+        # reference.  If we didn't do this here, later calls to resize
+        # would fail.
+        del A
+        del P
+        del T
+        del t
+
+        if 0 == i % 1000:
+            logging.info(f"  Finished loading {i} fragments")
+
+    # Resize all of the arrays to the newly-found N and concatenate
+    for i in range(L):
+        ts[i].resize(N)
+        As[i].resize(N)
+        Ps[i].resize(N)
+        Ts[i].resize(N)
+
+    # Concatenate our final results
+    A = np.concatenate(As).reshape((L, N))
+    P = np.concatenate(Ps).reshape((L, N))
+    T = np.concatenate(Ts).reshape((L, N))
+    t = np.concatenate(ts).reshape((L, N))
+
+    retval = (t, A, P, T, n_apt)
+
+    # Cache the values
+    if cache_dir:
+        cache_data_path = os.path.join(cache_dir, "apt_data.np")
+        logging.info(f"Saving APT data to cache: {cache_data_path}")
+        with open(cache_data_path, 'wb') as fd:
+            np.save(fd, t)
+            np.save(fd, A)
+            np.save(fd, P)
+            np.save(fd, T)
+            np.save(fd, n_apt)
+
+            meta = {
+                'fragments': fragments,
+                }
+
+        cache_meta_path = os.path.join(cache_dir, "apt_meta.pickle")
+        with open(cache_meta_path, 'wb') as fd:
+            pickle.dump(meta, fd)
+
+    return retval

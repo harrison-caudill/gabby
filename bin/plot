@@ -79,14 +79,23 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=desc,
                                      formatter_class=formatter)
 
-    parser.add_argument('--db-path', '-d',
-                        metavar='DB_PATH',
+    parser.add_argument('--full-db-path', '-u',
+                        metavar='FULL_DB_PATH',
                         action='store',
-                        dest='db_path',
+                        dest='full_db_path',
                         required=False,
                         type=str,
                         default='output/tle.db',
-                        help='Location of the lmdb (%(default)s)')
+                        help='Location of the full lmdb (%(default)s)')
+
+    parser.add_argument('--fragment-db-path', '-a',
+                        metavar='FRAGMENT_DB_PATH',
+                        action='store',
+                        dest='frag_db_path',
+                        required=False,
+                        type=str,
+                        default='output/fragments.db',
+                        help='Location of the fragments lmdb (%(default)s)')
 
     parser.add_argument('--config-file', '-c',
                         metavar='CONFIG_PATH',
@@ -96,6 +105,15 @@ if __name__ == '__main__':
                         type=str,
                         default='cfg/asat.cfg',
                         help='Path to the config file (%(default)s)')
+
+    parser.add_argument('--cache-path', '-A',
+                        metavar='CACHE_DIR',
+                        action='store',
+                        dest='cache_dir',
+                        required=False,
+                        type=str,
+                        default='%(output_dir)s/cache',
+                        help='Cache directory (%(default)s)')
 
     parser.add_argument('--target', '-t',
                         metavar='TARGET',
@@ -170,7 +188,15 @@ if __name__ == '__main__':
     # Get our output directory all set up
     output_dir = args.output_dir % arg_dict
     arg_dict['output_dir'] = output_dir
+    cache_dir = args.cache_dir % arg_dict
+    img_dir = os.path.join(output_dir, args.plot_type+'-img')
+
+    if args.clean:
+        if os.path.isdir(img_dir): shutil.rmtree(img_dir)
+        if os.path.isdir(cache_dir): shutil.rmtree(cache_dir)
+
     gabby.mkdir_p(output_dir)
+    gabby.mkdir_p(cache_dir)
 
     # Get set up to log
     log_file = args.log_file%arg_dict
@@ -191,27 +217,29 @@ if __name__ == '__main__':
     plt.ioff()
     matplotlib.use('TkAgg')
 
-    img_dir = os.path.join(output_dir, args.plot_type+'-img')
-    if args.clean and os.path.isdir(img_dir):
-        shutil.rmtree(img_dir)
-
-    db_path = args.db_path % arg_dict
+    full_db_path = args.full_db_path % arg_dict
+    frag_db_path = args.frag_db_path % arg_dict
 
     if args.plot_type == 'gabby':
         plotter = gabby.GabbyPlotter(cfg=cfg['general'],
                                      tgt=tgt,
                                      output_dir=output_dir,
                                      img_dir=img_dir,
-                                     db_path=db_path)
-        plotter.plot(n_threads=args.n_threads)
+                                     full_db_path=full_db_path,
+                                     frag_db_path=frag_db_path,
+                                     cache_dir=cache_dir)
+        plotter.plot_prediction()
+        #plotter.plot(n_threads=args.n_threads)
 
     elif args.plot_type == 'bstar':
         plotter = gabby.BStarPlotter(cfg=cfg['general'],
                                      tgt=tgt,
                                      output_dir=output_dir,
                                      img_dir=img_dir,
-                                     db_path=db_path)
-        plotter.plot(n_threads=args.n_threads)
+                                     full_db_path=full_db_path,
+                                     frag_db_path=frag_db_path)
+        #plotter.plot(n_threads=args.n_threads)
+        plotter.plot_prediction()
 
     else:
         logging.critical(f"WHAT DID YOU DO??? {args.plot_type}")

@@ -141,14 +141,10 @@ def _plot_image(arg):
 
         fig.suptitle(tgt['name'], y=0.97, fontsize=25)
 
-        # We're going to store the images in a separate directory for
-        # cleanliness
-        img_dir = os.path.join(output_dir, "img")
-
         # Save everything
-        path = f"{img_dir}/%*.*d.png"%(len(str(n_img)),
-                                       len(str(n_img)),
-                                       img_idx)
+        path = f"{self.img_dir}/%*.*d.png"%(len(str(n_img)),
+                                            len(str(n_img)),
+                                            img_idx)
 
         fig.savefig(path)
         logging.info(f"  Figure saved to {path}")
@@ -163,41 +159,79 @@ class GabbyPlotter(object):
     def __init__(self,
                  cfg=None,
                  tgt=None,
+                 img_dir=None,
                  output_dir=None,
-                 db_path=None,
-                 db_env=None):
+                 full_db_path=None,
+                 frag_db_path=None,
+                 cache_dir=None):
+        self.img_dir = img_dir
         self.cfg = cfg
         self.tgt = tgt
         self.output_dir = output_dir
-        self.db_path = db_path
+        self.cache_dir = cache_dir
 
-        if db_env: self.db_env = db_env
-        else: self.db_env = lmdb.Environment(self.db_path,
-                                             max_dbs=len(DB_NAMES),
-                                             map_size=int(DB_MAX_LEN))
-        self.db_gabby = self.db_env.open_db(DB_NAME_GABBY.encode())
-        self.db_idx = self.db_env.open_db(DB_NAME_IDX.encode())
-        self.db_scope = self.db_env.open_db(DB_NAME_SCOPE.encode())
+        load_dbs(self, full_db_path, frag_db_path)
 
     def get_latest_apt(self, txn, des):
         """Returns the latest APT for the given designator
         """
-        cursor = txn.cursor(db=self.db_scope)
+        cursor = txn.cursor(db=self.full_scope)
         cursor.set_range(des.encode())
         key, scope = cursor.item()
         start, end = struct.unpack('ii', scope)
 
         key = fmt_key(end, des)
-        tmp = txn.get(key, db=self.db_gabby)
+        tmp = txn.get(key, db=self.full_apt)
         if not tmp:
             key = fmt_key(start, des)
-            tmp = txn.get(key, db=self.db_gabby)
-            if not tmp:
-                print(key)
-                sys.exit(0)
+            tmp = txn.get(key, db=self.full_apt)
         a, p, t, = struct.unpack('fff', tmp)
         del cursor
         return (a, p, t,)
+
+    def plot_prediction(self):
+        jazz = Jazz(self.cfg,
+                    self.frag_env,
+                    self.frag_apt,
+                    self.frag_tle,
+                    self.frag_scope)
+        frags, apt, deriv, N = jazz.derivatives(fltr=jazz.lpf(),
+                                                cache_dir=self.cache_dir)
+
+        (moral_decay,
+         bins_A,
+         bins_P,) = jazz.decay_rates(apt, deriv, N,
+                                     n_A_bins=50,
+                                     n_P_bins=50,
+                                     n_D_bins=50)
+
+        for i in range(len(moral_decay)):
+            for j in range(len(moral_decay[i])):
+                i = 0
+                j = 0
+                fig = plt.figure(figsize=(12, 8))
+                #ax.pcolormesh(bins_A, bins_P, np)
+                fig.set_dpi(self.tgt.getint('dpi'))
+                ax = fig.add_subplot(1, 1, 1)
+                ax.plot(bins_A, moral_decay[i][j][0])
+                fig.savefig('output/wat.png')
+                sys.exit(0)
+                
+
+        sys.exit(0)
+
+        tmp = np.concatenate(Ad)
+
+        fig = plt.figure(figsize=(12, 8))
+        fig.set_dpi(self.tgt.getint('dpi'))
+        ax = fig.add_subplot(1, 1, 1)
+        tmp = np.sort(tmp)
+        N = len(tmp)
+        tmp = tmp[N//5:-1*(N//5)]
+        ax.hist(tmp, bins=100)
+        fig.savefig('output/wat.png')
+        sys.exit(0)
+
 
     def plot(self, n_threads=1):
         """Produces the images, but not the video.
@@ -217,7 +251,8 @@ class GabbyPlotter(object):
         mkdir_p(img_dir)
 
         # Read only transaction is all we'll need.
-        txn = lmdb.Transaction(self.db_env, write=False)
+        full_txn = lmdb.Transaction(self.full_env, write=False)
+        frag_txn = lmdb.Transaction(self.frag_env, write=False)
 
         # Log the time so we can track how long it's going to take
         # plot_start = datetime.datetime.now()
@@ -237,7 +272,7 @@ class GabbyPlotter(object):
             des, name, color, = comp.split('|')
             cur = {'name': name,
                    'color': color,
-                   'apt': tuple(self.get_latest_apt(txn, des)),
+                   'apt': tuple(self.get_latest_apt(full_txn, des)),
                    'is_static': True
                    }
             comparators[des] = cur
@@ -251,7 +286,7 @@ class GabbyPlotter(object):
         logging.info(f"  Finding the scope of all fragments")
         scope_start = {}
         scope_end = {}
-        scope_cursor = txn.cursor(db=self.db_scope)
+        scope_cursor = frag_txn.cursor(db=self.frag_scope)
         for des, scope in scope_cursor:
             des = des.decode()
             if des in mask: continue
@@ -262,7 +297,7 @@ class GabbyPlotter(object):
                     scope_end[des] = end
 
         # Initialize our main cursor
-        cursor = txn.cursor(db=self.db_idx)
+        cursor = frag_txn.cursor(db=self.frag_idx)
 
         # Time step between images
         dt = datetime.timedelta(days=self.tgt.getint('plot-period'))
@@ -292,7 +327,7 @@ class GabbyPlotter(object):
         fig.savefig(img_path)
 
         # Find the raw values
-        t, A, P, T, = self._prep_plot_data(txn,
+        t, A, P, T, = self._prep_plot_data(frag_txn,
                                            scope_start, scope_end,
                                            start_d, end_d, dt)
         fragments = sorted(list(scope_start.keys()))
@@ -348,7 +383,7 @@ class GabbyPlotter(object):
                         dt):
 
         # Initialize our main cursor
-        cursor = txn.cursor(db=self.db_idx)
+        cursor = txn.cursor(db=self.frag_idx)
 
         # Get our index into the fragments
         fragments = sorted(list(scope_start.keys()))

@@ -10,6 +10,8 @@ import numpy as np
 import os
 import pickle
 import pprint
+import scipy
+import scipy.ndimage
 import subprocess
 import struct
 import sys
@@ -56,20 +58,43 @@ def _plot_image(arg):
 
 
 class BStarPlotter(object):
+    """
+
+        === Daily Average ===
+        N (days) x L (frag) float32 BStar values
+        +
+        |    ----          Plot the IQR or similar showing how the
+        | --'___ \         distribution changes over time.  Allows passing
+        | --'   \ `------  individual arrays to matplotlib without alteration.
+        | __,---,`-------
+        |        \_______
+        +----------------+
+               Time
+
+        === Distribution Animation ===
+        N (days) x L (frag) float32 BStar values
+
+        +
+        |    ----          Plot a series of images to be animated like a
+        | --'    \         gabby plot.  Allows contiguous memory access for
+        |         `------  generating each individual plot.
+        |                
+        +----------------+
+               Time
+    """
 
     def __init__(self,
                  cfg=None,
                  tgt=None,
                  output_dir=None,
                  img_dir=None,
-                 db_path=None,
-                 db_env=None):
+                 db_path=None):
         self.cfg = cfg
         self.tgt = tgt
         self.output_dir = output_dir
         self.img_dir = img_dir
         self.db_path = db_path
-        load_dbs(self, db_env, db_path)
+        load_dbs(self, None, db_path)
 
     def plot(self, n_threads=1):
         """Produces the images, but not the video.
@@ -110,9 +135,10 @@ class BStarPlotter(object):
         last_idx = int((end_d - start_d) / dt)
 
         # Fetch all the BStar values into RAM
-        Xt, Bs, = self._fetch_bstar(txn,
-                                    scope_start, scope_end,
-                                    start_d, end_d, dt)
+        Bs = self._fetch_bstar(txn,
+                               scope_start, scope_end,
+                               start_d, end_d, dt)
+        Xt = np.arange(start_d, end_d, dt)
         self._plot_time_img(Xt, Bs)
 
         # FIXME
@@ -124,22 +150,48 @@ class BStarPlotter(object):
         fig = plt.figure(figsize=(12, 8))
         fig.set_dpi(self.tgt.getint('dpi'))
         ax = fig.add_subplot(1, 1, 1)
-        ax.set_yscale("log")
+        #ax.set_yscale("log")
 
-        fig.suptitle(f"Mean/Std B* Values")
+        mean = np.zeros(N, dtype=np.float32)
+        med = np.zeros(N, dtype=np.float32)
+        dev = np.zeros(N, dtype=np.float32)
+
+        n = self.tgt.getint('n-days-square-filt')
+        kernel = np.zeros((n, n))
+        for i in range(n): kernel[i][0] = 1.0/n
+        data = scipy.ndimage.convolve(Bs, kernel, mode='constant', cval=0.0)
+
+        for i in range(N):
+            cur = np.trim_zeros(data[i])
+
+            # Compute an initial mean/std-deviation
+            mean[i] = np.mean(cur)
+            dev[i] = np.std(cur)
+
+            # Remove apparent outliers
+            ul = mean[i]*4
+            ll = mean[i]/4
+            wat = np.sum(cur)
+            cur = np.where(cur > ul, 0, cur)
+            cur = np.where(cur < ll, 0, cur)
+            cur = cur[cur != 0]
+
+            #mean[i] = np.mean(cur)
+            dev[i] = np.std(cur)
+
+        name = self.tgt['name']
+        fig.suptitle(f"Mean/Std B* Values ({name})")
+        ax.set_title(f"Values are averaged over {n} days")
         ax.set_ylabel("BStar")
         ax.set_xlabel("Observation Date")
 
-        val = np.zeros(N, dtype=np.float32)
-        std = np.zeros(N, dtype=np.float32)
-        for i in range(N):
-            val[i] = np.mean(Bs[i])
-            std[i] = np.std(Bs[i])
-
-        low = np.where(val-std < 0, 0, val-std)
-        ax.fill_between(Xt, low, val+std, alpha=0.5, color='red')
-        ax.plot(Xt, val, color='black')
-        fig.savefig('wat.png')
+        low = np.where(mean-dev < 0, 0, mean-dev)
+        ax.fill_between(Xt, low, mean+dev,
+                        alpha=0.25, color='green',
+                        label='One Standard Deviation')
+        ax.plot(Xt, mean, label='Mean Value')
+        fig.legend(loc=1)
+        fig.savefig(os.path.join(self.output_dir, "bstar.png"))
 
     def _fetch_bstar(self,
                      txn,
@@ -149,28 +201,8 @@ class BStarPlotter(object):
         """Fetches the time-averaged B* values from the DB
 
         This runs in about 4.5 seconds for Fengyun
+        N (days) x L (frag) float32 BStar values
         
-        === Daily Average ===
-        N (days) x L (frag) float32 BStar values
-
-        +
-        |    ----          Plot the IQR or similar showing how the
-        | --'___ \         distribution changes over time.  Allows passing
-        | --'   \ `------  individual arrays to matplotlib without alteration.
-        |        `-------
-        +----------------+
-               Time
-
-        === Distribution Animation ===
-        N (days) x L (frag) float32 BStar values
-
-        +
-        |    ----          Plot a series of images to be animated like a
-        | --'    \         gabby plot.  Allows contiguous memory access for
-        |         `------  generating each individual plot.
-        |                
-        +----------------+
-               Time
         """
 
         # Initialize our main cursor
@@ -189,7 +221,6 @@ class BStarPlotter(object):
         start_ts = int(start_d.timestamp())
         end_ts = int(end_d.timestamp())
         dt_s = int(dt.total_seconds())
-        Xt = np.arange(start_ts, end_ts, dt_s)
 
         # Temporally-averaged B* values for each fragment
         Bs = np.zeros((N, L), dtype=np.float32)
@@ -251,4 +282,4 @@ class BStarPlotter(object):
                     prev_v = 0
                     prev_n = 0
 
-        return Xt, Bs
+        return Bs
