@@ -40,6 +40,20 @@ roughly 1km intervals which is assumed to be the materiality threshold.
 """
 
 
+class MoralDecay(object):
+    """Explores the depths of moral (and orbial) decay rates.
+
+    decay_hist:
+      [A=0,P=1][A-bin][P-bin][D-bin]
+
+      Derivative bins are from D_min-D_max for the specific
+      combination of A/P A and
+    """
+
+    def __init__(self, decay_hist, cdf, pct, bins_A, bins_P, Ap, Ad, Pp, Pd):
+        pass
+
+
 class Jazz(object):
 
     def __init__(self, cfg, env, apt, tle, scope):
@@ -101,7 +115,7 @@ class Jazz(object):
                     frag = k.decode()
                     if satellite not in frag: break
 
-                    start, end, = struct.unpack('ii', v)
+                    start, end, = unpack_scope(v)
 
                     # We only consider fully-decayed fragments
                     if end > cutoff_ts: continue
@@ -115,7 +129,7 @@ class Jazz(object):
                     end_reg[frag] = end
 
                     apt_bytes = txn.get(fmt_key(start, frag), db=self.db_apt)
-                    a, p, t, = struct.unpack('fff', apt_bytes)
+                    a, p, t, = unpack_apt(apt_bytes)
 
                     a_reg[frag] = a
                     p_reg[frag] = p
@@ -202,7 +216,6 @@ class Jazz(object):
 
         finally:
             if txn: txn.commit()
-
 
     def resample(self, X, Y, dx, sub='linear'):
         """Resamples the aperiodic signal to periodic sampling.
@@ -343,20 +356,132 @@ class Jazz(object):
         retval = (fragments, ret_filtered, ret_deriv, N)
         return retval
 
-    def decay_rates(self,
-                    positions,
-                    derivatives,
-                    Ns,
-                    ignore_frac=.01,
-                    n_A_bins=100,
-                    n_P_bins=100,
-                    n_D_bins=100,
-                    min_apogee=150,
-                    max_apogee=1500,
-                    min_perigee=100,
-                    max_perigee=1000):
+    def __concatenate(self, arr, N, subkeys=None):
+        """
+        +-         + +-   -+
+        |  1  2  3 | |  3  |
+        |  4  0  0 | |  1  | => [1 2 3 4 7 8]
+        |  7  8  0 | |  2  |
+        +-        -+ +-   -+
+        """
 
+        L = len(arr)
+        retval = np.zeros(np.sum(N), dtype=arr.dtype)
+        j = 0
+        for i in range(L):
+            tmp = arr[i]
+            for k in subkeys: tmp = tmp[k]
+            retval[j:j+N[i]] = tmp[:N[i]]
+            j += N[i]
+        return retval
+
+    def _percentile_values(self, arr, low_frac, high_frac):
+        """Finds the lower and upper bounds after pruning the fraction.
+        """
+
+        N = len(arr)
+
+        if low_frac:
+            # Find the low-end value
+            off = int(N * low_frac)
+            tmp = np.partition(arr, off)
+            low = tmp[off]
+            del tmp
+        else:
+            low = np.min(arr)
+
+        if high_frac:
+            # Find the high-end value
+            off = N - off - 1
+            tmp = np.partition(arr, off)
+            high = tmp[off]
+            del tmp
+        else:
+            high = np.max(arr)
+
+        return (low, high)
+
+    def clip_to_flanks(self, arr, n_bins,
+                       low_clip=None, high_clip=None,
+                       min_val=None, max_val=None):
+        """Clips values so that binning puts them in flanking bins.
+
+        min/max values are bounded by the clip_frac as well as by the
+        min/max values passed in.
+        """
+
+        # Find our actual clipping values
+        clip_min, clip_max, = self._percentile_values(arr, low_clip, high_clip)
+
+        # Apply any hard constraints
+        if min_val is not None:
+            clip_min = max(clip_min, min_val)
+            clip_max = max(clip_max, min_val)
+        if max_val is not None:
+            clip_min = min(clip_min, max_val)
+            clip_max = min(clip_max, max_val)
+
+        step = (clip_max-clip_min)/(n_bins-1)
+
+        print((clip_max-clip_min), n_bins, (clip_max-clip_min)/(n_bins-1))
+
+
+
+        # We're going to clip the values to ensure they fall into one
+        # of the flanking bins.  That lets us use exactly the same
+        # machinery later on during the binning process but without
+        # including the clipped values in the actual results (the
+        # inner bins).
+        retval = np.clip(arr, clip_min-step*.9, clip_max+step*.9)
+
+        return clip_min, clip_max, step, retval
+
+    def _flanking_digitize(self, arr, min_val, step):
+        """Digitizes the values to a bin with extremes in flanking bins
+
+        Once you've clipped to flanks, this will indexes into bins.
+        The lower flanking bin will be offset 0, and the peak offset
+        will be N+1.  If done properly, then the real data is between
+        1 and N.
+        """
+        assert(0 < step)
+        tmp = (arr - min_val) / step
+        tmp = np.round(tmp, decimals=0).astype(np.int) + 1
+        return tmp
+
+    def decay_rates(self, positions, derivatives, Ns):
+        """Bins the decay rate distributions.
+
+        retval: [A'=0,P'=1][A-bin][P-bin][D-bin] = d(A/P)/dt
+
+        dt is defined in the call to derivatives() defaulting to 1 day.
+
+        positions: [frag-number][off][0] = time
+                   [frag-number][off][1] = apogee value
+                   [frag-number][off][2] = perigee value
+
+        derivatives: same as positions, but it's (d/dt)(A|P) and same time vals
+        """
+
+        cfg = self.cfg
+        Ap_min = cfg.getint('min-apogee')
+        Ap_max = cfg.getint('max-apogee')
+        Ad_prune_low = cfg.getfloat('apogee-deriv-low-prune')
+        Ad_prune_high = cfg.getfloat('apogee-deriv-high-prune')
+
+        Pp_min = cfg.getint('min-perigee')
+        Pp_max = cfg.getint('max-perigee')
+        Pd_prune_low = cfg.getfloat('perigee-deriv-low-prune')
+        Pd_prune_high = cfg.getfloat('perigee-deriv-high-prune')
+
+        n_A_bins = cfg.getint('n-apogee-bins')
+        n_P_bins = cfg.getint('n-perigee-bins')
+        n_D_bins = cfg.getint('n-deriv-bins')
+
+        # Useful numbers
+        L = len(positions)
         N = np.sum(Ns)
+
         logging.info(f"Quantifying Moral Decay from {N} samples")
 
         # FIXME: Any normalization steps for things like B* compared
@@ -364,85 +489,64 @@ class Jazz(object):
 
         # We don't care about fragment separation so just concatenate
         # everything
-        L = len(positions)
-        Ap = np.zeros(N, dtype=np.float32)
-        Pp = np.zeros(N, dtype=np.float32)
-        Ad = np.zeros(N, dtype=np.float32)
-        Pd = np.zeros(N, dtype=np.float32)
-        j = 0
-        for i in range(L):
-            Ap[j:j+Ns[i]] = positions[i][1][:Ns[i]]
-            Pp[j:j+Ns[i]] = positions[i][2][:Ns[i]]
-            Ad[j:j+Ns[i]] = derivatives[i][1][:Ns[i]]
-            Pd[j:j+Ns[i]] = derivatives[i][2][:Ns[i]]
-            j += Ns[i]
+        logging.info("  Concatenating all values into single arrays")
+        Ap = self.__concatenate(positions, Ns, subkeys=[1])
+        Pp = self.__concatenate(positions, Ns, subkeys=[2])
+        Ad = self.__concatenate(derivatives, Ns, subkeys=[1])
+        Pd = self.__concatenate(derivatives, Ns, subkeys=[2])
 
-        logging.info("  Partitioning derivatives")
-        start = datetime.datetime.now().timestamp()
-        n_skip = int(ignore_frac * np.sum(N))
-        Ad_part = np.partition(Ad, n_skip)
-        Ad_min = Ad[n_skip]
-        Ad_part = np.partition(Ad, N-n_skip)
-        Ad_max = Ad[N-n_skip]
+        logging.info("  Clipping the values")
+        (Ap_min, Ap_max,
+         Ap_step, Ap) = self.clip_to_flanks(Ap, n_A_bins,
+                                            min_val=Ap_min,
+                                            max_val=Ap_max)
+        (Ad_min, Ad_max,
+         Ad_step, Ad) = self.clip_to_flanks(Ad, n_D_bins,
+                                            low_clip=Ad_prune_low,
+                                            high_clip=Ad_prune_high)
 
-        Pd_part = np.partition(Pd, n_skip)
-        Pd_min = Pd[n_skip]
-        Pd_part = np.partition(Pd, N-n_skip)
-        Pd_max = Pd[N-n_skip]
-        end = datetime.datetime.now().timestamp()
-
-        logging.info("  Clipping the derivative arrays")
-        Ad_step = (Ad_max-Ad_min)/(n_D_bins-1) # n_bins, not n_steps
-        Pd_min = Pd[n_skip]
-        Pd_max = Pd[-1*n_skip]
-        Pd_step = (Pd_max-Pd_min)/(n_D_bins-1) # n_bins, not n_steps
-        # Place all ignored values into flanking bins
-        Ad = np.clip(Ad, Ad_min-Ad_step, Ad_max+Ad_step)
-        Pd = np.clip(Pd, Pd_min-Pd_step, Pd_max+Pd_step)
-
-        logging.info("  Clipping the Apogee/Perigee arrays")
-        A_min = min_apogee
-        A_max = max_apogee
-        P_min = min_perigee
-        P_max = max_perigee
-        P_step = (P_max-P_min)/(n_P_bins-1)
-        A_step = (A_max-A_min)/(n_A_bins-1)
-        Ap = np.clip(Ap, A_min-A_step*.9, A_max+A_step*.9)
-        Pp = np.clip(Pp, P_min-P_step*.9, P_max+P_step*.9)
+        (Pp_min, Pp_max,
+         Pp_step, Pp) = self.clip_to_flanks(Pp, n_A_bins,
+                                            min_val=Pp_min,
+                                            max_val=Pp_max)
+        (Pd_min, Pd_max,
+         Pd_step, Pd) = self.clip_to_flanks(Pd, n_D_bins,
+                                            low_clip=Pd_prune_low,
+                                            high_clip=Pd_prune_high)
 
         logging.info("  Discretizing the bin numbers")
-        Ap = (Ap - min_apogee) / A_step
-        Ad = (Ad - Ad_min) / Ad_step
-        Pp = (Pp - min_perigee) / P_step
-        Pd = (Pd - Pd_min) / Pd_step
-
-        # We add one so that they are valid indices into an array
-        Ap = np.round(Ap, decimals=0).astype(np.int) + 1
-        Ad = np.round(Ad, decimals=0).astype(np.int) + 1
-        Pp = np.round(Pp, decimals=0).astype(np.int) + 1
-        Pd = np.round(Pd, decimals=0).astype(np.int) + 1
+        Ap = self._flanking_digitize(Ap, Ap_min, Ap_step)
+        Ad = self._flanking_digitize(Ad, Ad_min, Ad_step)
+        Pp = self._flanking_digitize(Pp, Pp_min, Pp_step)
+        Pd = self._flanking_digitize(Pd, Pd_min, Pd_step)
 
         logging.info("  Constructing a sorted universal key/value int64")
         # <bin-A><bin-P><derivative-bin>
 
         start = datetime.datetime.now().timestamp()
-        bits_A = int(math.ceil(math.log(n_A_bins, 2)))
-        bits_P = int(math.ceil(math.log(n_P_bins, 2)))
-        bits_D = int(math.ceil(math.log(n_D_bins, 2)))
+        bits_A = int(math.ceil(math.log(n_A_bins, 2)))+1
+        bits_P = int(math.ceil(math.log(n_P_bins, 2)))+1
+        bits_D = int(math.ceil(math.log(n_D_bins, 2)))+1
+
+        shift_A = bits_P + bits_D
+        shift_P = bits_D
+        shift_D = 0
+        mask_A = ((1<<bits_A)-1)<<shift_A
+        mask_P = ((1<<bits_P)-1)<<shift_P
+        mask_D = ((1<<bits_D)-1)<<shift_D
+
         univ = np.zeros(N, dtype=np.int64)
-        univ += Ap
-        univ *= 2**bits_P
-        univ += Pp
-        univ *= 2**bits_D
-        univ_A = univ + Ad
-        univ_P = univ + Pd
+        univ |= (Ap << shift_A)
+        univ |= (Pp << shift_P)
+        univ_A = univ | (Ad << shift_D)
+        univ_P = univ | (Pd << shift_D)
 
         end = datetime.datetime.now().timestamp()
         logging.info(f"    Universalizing took: {int((end-start)*1000)}ms")
 
         start = datetime.datetime.now().timestamp()
-        np.sort(univ_A)
-        np.sort(univ_P)
+        univ_A.sort()
+        univ_P.sort()
         end = datetime.datetime.now().timestamp()
         logging.info(f"    Sorting that took: {int((end-start)*1000)}ms")
 
@@ -452,7 +556,7 @@ class Jazz(object):
         for i in range(n_A_bins+2):
             for j in range(n_P_bins+2):
                 for k in range(n_D_bins+2):
-                    srch = (i)<<(bits_P+bits_D) | (j)<<bits_D | k
+                    srch = (i<<shift_A) | (j<<shift_P) | (k<<shift_D)
                     index[0][i][j][k] = np.searchsorted(univ_A, srch)
                     index[1][i][j][k] = np.searchsorted(univ_P, srch)
         end = datetime.datetime.now().timestamp()
@@ -461,8 +565,8 @@ class Jazz(object):
         logging.info("  Binning")
         start = datetime.datetime.now().timestamp()
 
-        retval = np.zeros((2, n_A_bins, n_P_bins, n_D_bins),
-                       dtype=np.float32)
+        moral_decay = np.zeros((2, n_A_bins, n_P_bins, n_D_bins),
+                               dtype=np.float32)
 
         for i in range(1, n_A_bins+1, 1):
             for j in range(1, n_P_bins+1, 1):
@@ -470,16 +574,42 @@ class Jazz(object):
                 tot_P = 0.0
                 for k in range(2, n_D_bins+2, 1):
                     cur = index[0][i][j][k] - index[0][i][j][k-1]
-                    retval[0][i-1][j-1][k-2] = cur
+                    moral_decay[0][i-1][j-1][k-2] = cur
                     tot_A += cur
                     cur = index[1][i][j][k] - index[1][i][j][k-1]
-                    retval[1][i-1][j-1][k-2] = cur
+                    moral_decay[1][i-1][j-1][k-2] = cur
                     tot_P += cur
-                if tot_A: retval[0][i-1][j-1] /= tot_A
-                if tot_P: retval[1][i-1][j-1] /= tot_P
+                if tot_A: moral_decay[0][i-1][j-1] /= tot_A
+                if tot_P: moral_decay[1][i-1][j-1] /= tot_P
         end = datetime.datetime.now().timestamp()
         logging.info(f"    Binning took: {int((end-start)*1000)}ms")
 
+        Z = np.zeros((n_A_bins, n_P_bins), dtype=np.int)
+        for i in range(n_A_bins):
+            for j in range(n_P_bins):
+                Z[i][j] = np.sum(moral_decay[0][i][j])
+
+        # fig = plt.figure(figsize=(12, 8))
+        # ax = fig.add_subplot(1, 1, 1)
+        # c =ax.pcolor(Z)
+        # fig.colorbar(c, ax=ax)
+        # fig.savefig('output/Ad_mesh.png')
+
         bins_A = np.linspace(Ad_min, Ad_max, n_D_bins)
         bins_P = np.linspace(Pd_min, Pd_max, n_D_bins)
-        return retval, bins_A, bins_P
+
+        # CDF
+        cdf = np.copy(moral_decay)
+        for i in range(n_A):
+            for j in range(n_P):
+                cdf[0][i][j] = np.cumsum(cdf[0][i][j])
+                cdf[1][i][j] = np.cumsum(cdf[1][i][j])
+
+        # Percentiles
+        pct = np.copy(cdf)
+        for i in range(n_A):
+            for j in range(n_P):
+                pct[0][i][j] = self._inverse(pct[0][i][j])
+                pct[1][i][j] = self._inverse(pct[1][i][j])
+
+        return MoralDecay(moral_decay, cdf, pct, bins_A, bins_P, Ap, Ad, Pp, Pd)

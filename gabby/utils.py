@@ -1,12 +1,16 @@
-import os
+import astropy
+import datetime
 import lmdb
 import logging
 import numpy as np
+import os
 import pickle
 import pprint
 import struct
+import sys
 
 from .defs import *
+
 
 def mkdir_p(path):
     """Emulates the functionality of mkdir -p
@@ -69,7 +73,7 @@ def load_scope(txn, db_scope, target_des):
         des = des.decode()
         for prefix in target_des:
             if des.startswith(prefix):
-                start, end = struct.unpack('ii', scope)
+                start, end = unpack_scope(scope)
                 scope_start[des] = start
                 scope_end[des] = end
     return scope_start, scope_end
@@ -77,20 +81,26 @@ def load_scope(txn, db_scope, target_des):
 
 def load_dbs(obj, full_path, frag_path):
     full_env = lmdb.Environment(full_path,
-                                max_dbs=len(DB_NAMES),
-                                map_size=int(DB_MAX_LEN))
+                                max_dbs=N_DBS,
+                                map_size=DB_MAX_LEN)
     obj.full_env = full_env
     obj.full_tle = obj.full_env.open_db(DB_NAME_TLE.encode())
     obj.full_apt = obj.full_env.open_db(DB_NAME_APT.encode())
     obj.full_scope = obj.full_env.open_db(DB_NAME_SCOPE.encode())
 
-    frag_env = lmdb.Environment(frag_path,
-                                max_dbs=len(DB_NAMES),
-                                map_size=int(DB_MAX_LEN))
-    obj.frag_env = frag_env
-    obj.frag_tle = obj.frag_env.open_db(DB_NAME_TLE.encode())
-    obj.frag_apt = obj.frag_env.open_db(DB_NAME_APT.encode())
-    obj.frag_scope = obj.frag_env.open_db(DB_NAME_SCOPE.encode())
+    if frag_path:
+        frag_env = lmdb.Environment(frag_path,
+                                    max_dbs=N_DBS,
+                                    map_size=DB_MAX_LEN)
+        obj.frag_env = frag_env
+        obj.frag_tle = obj.frag_env.open_db(DB_NAME_TLE.encode())
+        obj.frag_apt = obj.frag_env.open_db(DB_NAME_APT.encode())
+        obj.frag_scope = obj.frag_env.open_db(DB_NAME_SCOPE.encode())
+    else:
+        obj.frag_env = None
+        obj.frag_tle = None
+        obj.frag_apt = None
+        obj.frag_scope = None
 
 def find_daughter_fragments(base, txn, db_scope):
     retval = []
@@ -106,6 +116,25 @@ def find_daughter_fragments(base, txn, db_scope):
 
 def load_apt(fragments, txn, db_apt, cache_dir=None):
     """Loads the APT values from the DB.
+
+    Returns a tuple of np.arrays:
+
+    There are L rows (one for each fragment in fragments) and a total
+    of N columns where N is the maximum number of observations of any
+    given fragment.  The array (of length L) N indicates the number of
+    observations of that fragment.
+
+    (t=[[t0, t1, ..., tn, 0, ..., 0],
+        [t0, t1, ..., tn, 0, ..., 0],
+        ...
+        [t0, t1, ..., tn, 0, ..., 0]],
+     A=[[A0, A1, ..., An, 0, ..., 0],
+        [A0, A1, ..., An, 0, ..., 0],
+        ...
+        [A0, A1, ..., An, 0, ..., 0]],
+     P...
+     T...,
+     N = [N0, N1, ..., NL])
     """
 
     if cache_dir:
@@ -229,3 +258,60 @@ def load_apt(fragments, txn, db_apt, cache_dir=None):
             pickle.dump(meta, fd)
 
     return retval
+
+def time_command(f, msg):
+    def retval(*args, **kwargs):
+        logging.info("%s"%msg)
+        start = datetime.datetime.now().timestamp()
+        f(*args, **kwargs)
+        end = datetime.datetime.now().timestamp()
+        ms = int((end - start)*1000)
+        logging.info("  Call completed in {ms}ms")
+
+def parse_date(timestr):
+    """Uses the package's preferred format to parse a date into UTC.
+    """
+
+    # Ugly, but it works
+    timestr += '-+0000'
+    fmt = DATE_FMT + '-%z'
+    return datetime.datetime.strptime(timestr, fmt)
+
+def plot_apt(frag, tapt, path):
+    fig = plt.figure(figsize=(12, 8))
+    fig.set_dpi(300)
+    if frag: fig.suptitle(f"Decay profile: {frag}")
+    else: fig.suptitle(f"Decay profile")
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xlabel('Time Since Launch (days)')
+    ax.set_ylabel('Orbital Altitude (km)')
+
+    t, A, P, T = tapt
+    t -= t[0]
+    plt_A = ax.plot(t, A, color='firebrick', label='Apogee')
+    plt_P = ax.plot(t, P, color='dodgerblue', label='Perigee')
+    ax.legend(loc=1)
+
+    ax = ax.twinx()
+    plt_T = ax.plot(t, T/60.0, color='black', label='Period')
+    ax.set_ylabel('Period (minutes)')
+    ax.legend(loc=2)
+
+    plts = plt_A + plt_P + plt_T
+    labs = [p.get_label() for p in plts]
+    ax.legend(plts, labs, loc=1)
+
+    fig.savefig(path)
+
+def keplerian_period(A, P):
+        Re = (astropy.constants.R_earth/1000.0).value
+        RA = A+Re
+        RP = P+Re
+        e = (RA-RP) / (RA+RP)
+
+        # These are all in meters
+        a = 1000*(RA+RP)/2
+        mu = astropy.constants.GM_earth.value
+        T = 2 * np.pi * (a**3/mu)**.5 / 60.0
+
+        return T

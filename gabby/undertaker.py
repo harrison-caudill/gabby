@@ -1,9 +1,11 @@
 import datetime
 import lmdb
 import logging
+import json
 import numpy as np
 import os
 import pickle
+import pprint
 import subprocess
 import struct
 import sys
@@ -18,14 +20,86 @@ class Undertaker(object):
     """Brings data into the DB.
     """
 
-    def __init__(self,
-                 db_path=None,
-                 db_env=None):
+    def __init__(self, db_path):
         self.db_path = db_path
-        utils.load_dbs(self, db_env, db_path)
+        utils.load_dbs(self, db_path, None)
+        self.db_env = self.full_env
+        self.db_tle = self.full_tle
+        self.db_apt = self.full_apt
+        self.db_scope = self.full_scope
 
     def index_db(self):
         self._build_scope()
+
+    def load_json(self, path, store_tles=False, base_des=None, force=False):
+        """Loads the JSON-based TLE data into the DB.
+
+        The import process is heavily duplicated because of the speed
+        requirements of the TLE file import.
+        """
+
+        offsets = self._build_calendar_offsets
+
+        logging.info(f"  Importing json data from {path}")
+        txn = lmdb.Transaction(self.full_env, write=True)
+
+        with open(path, 'r') as fd: data = json.load(fd)
+
+        for datum in data['data']:
+            des = datum['INTLDES']
+            ts = parse_date(datum['EPOCH'])
+
+            ### INLINE-CODE
+            key = ("%s,%12.12d"%(des, ts)).encode()
+            apogee = float(datum['APOGEE'])
+            perigee = float(datum['PERIGEE'])
+            period = float(datum['PERIOD'])
+            apt_bytes = pack_apt(A=apogee, P=perigee, T=period)
+
+            txn.put(key, apt_bytes,
+                    db=self.full_apt,
+                    overwrite=True)
+
+            n = float(datum['MEAN_MOTION'])
+            ndot = float(datum['MEAN_MOTION_DOT'])
+            nddot = float(datum['MEAN_MOTION_DDOT'])
+            bstar = float(datum['BSTAR'])
+            tle_num = int(datum['ELEMENT_SET_NO'])
+            inc = float(datum['INCLINATION'])
+            raan = float(datum['RA_OF_ASC_NODE'])
+            ecc = float(datum['ECCENTRICITY'])
+            argp = float(datum['ARG_OF_PERICENTER'])
+            mean_anomaly = float(datum['MEAN_ANOMALY'])
+            rev_num = int(datum['REV_AT_EPOCH'])
+            tle_bytes = pack_tle(n=n, ndot=ndot, nddot=nddot,
+                                 bstar=bstar, tle_num=tle_num, inc=inc,
+                                 raan=raan, ecc=ecc, argp=argp,
+                                 mean_anomaly=mean_anomaly, rev_num=rev_num)
+            txn.put(key, tle_bytes,
+                    db=self.full_tle,
+                    overwrite=True)
+
+    def _build_calendar_offsets(self):
+        logging.info("  Generating Time Lookup Table")
+        # To make the timestamp computation go more quickly, we're
+        # going to do it this way.  We DON'T keep track of leap
+        # seconds, only leap days.
+        offsets = np.zeros([100,366])
+        for year in range(100):
+            d = datetime.datetime(year=year+o,
+                                  month=1,
+                                  day=1,
+                                  tzinfo=datetime.timezone.utc)
+            for day in range(366):
+                o = 2000 if year+1900 < EPOCH_YEAR else 1900
+                try:
+                    dt = datetime.timedelta(days=day)
+                    offsets[year][day] = dt_to_ts(d + dt)
+                except ValueError:
+                    # This happens when there isn't a leap year
+                    continue
+
+        return offsets
 
     def load_tlefile(self, path, store_tles=False, base_des=None, force=False):
         """Loads the TLE file into the DB.
@@ -49,30 +123,13 @@ class Undertaker(object):
         values, or ... without spending a decade importing the values.
         """
 
-        logging.info("  Generating Time Lookup Table")
-        # To make the timestamp computation go more quickly, we're
-        # going to do it this way.  We DON'T keep track of leap
-        # seconds, only leap days.
-        offsets = np.zeros([100,366])
-        for year in range(100):
-            for day in range(366):
-                o = 2000 if year < 57 else 1900
-                try:
-                    d = datetime.datetime(year=year+o,
-                                          month=1,
-                                          day=1,
-                                          tzinfo=datetime.timezone.utc)
-                    dt = datetime.timedelta(days=(day))
-                    d += dt
-                    offsets[year][day] = d.timestamp()
-                except ValueError:
-                    continue
+        offsets = self._build_calendar_offsets
 
         MINUTES_PER_DAY = 24*60
         SECONDS_PER_DAY = MINUTES_PER_DAY*60
 
         logging.info(f"  Importing data from {path}")
-        txn = lmdb.Transaction(self.db_env, write=True)
+        txn = lmdb.Transaction(self.full_env, write=True)
         N = 0
         skipped = 0
         start = datetime.datetime.now().timestamp()
@@ -106,6 +163,7 @@ class Undertaker(object):
                 seconds = int((day_part - day) * SECONDS_PER_DAY)
                 ts = int(offsets[year][day-1] + seconds)
 
+                # INLINE-KEY
                 key = ("%s,%12.12d"%(des, ts)).encode()
 
                 # Increment the processed count now, since we may skip
@@ -153,6 +211,7 @@ class Undertaker(object):
                         rev_num = int(line_2[63:68])  # i
                         pack_vals = [n, ndot, nddot, bstar, tle_num, inc,
                                      raan, ecc, argp, mean_anomaly, rev_num]
+                        ### INLINE-CODE
                         tle_bytes = struct.pack(TLE_STRUCT_FMT, *pack_vals)
                         txn.put(key, tle_bytes, db=self.db_tle,
                                 overwrite=True)
@@ -162,7 +221,8 @@ class Undertaker(object):
                         continue
 
                 # Pack the bytes
-                apt_bytes = struct.pack('fff', apogee, perigee, period)
+                ### INLINE-CODE
+                apt_bytes = struct.pack(APT_STRUCT_FMT, apogee, perigee, period)
                 txn.put(key, apt_bytes,
                         db=self.db_apt,
                         overwrite=True)
@@ -175,7 +235,7 @@ class Undertaker(object):
 
     def _build_scope(self):
         logging.info("Annotating Fragment Scope Table")
-        txn = lmdb.Transaction(self.db_env, write=True)
+        txn = lmdb.Transaction(self.full_env, write=True)
 
         N = 0
 
@@ -189,10 +249,6 @@ class Undertaker(object):
         start_ts = None
         last_ts = None
 
-        all_sats = {}
-        start = {}
-        end = {}
-
         for key, _ in cursor:
             des, ts, = key.decode().split(',')
             ts = int(ts)
@@ -201,15 +257,10 @@ class Undertaker(object):
 
             else:
                 if cur_des:
-                    a = first_ts
-                    b = last_ts
-                    reg = struct.pack('ii', a, b)
+                    reg = pack_scope(start=first_ts, end=last_ts)
                     txn.put(cur_des.encode(), reg,
                             db=self.db_scope,
                             overwrite=True)
-                    start[cur_des] = a
-                    end[cur_des] = b
-
                 cur_des = des
                 first_ts = ts
                 last_ts = ts
@@ -223,13 +274,9 @@ class Undertaker(object):
 
         if cur_des and start_ts is not None and end_ts is not None:
             while txn.delete(cur_des.encode()): pass
-            a = first_ts
-            b = last_ts
-            reg = struct.pack('ii', a, b)
+            reg = pack_scope(start=first_ts, end=last_ts)
             txn.put(cur_des.encode(), reg,
                     db=self.db_scope,
                     overwrite=True)
-            start[cur_des] = a
-            end[cur_des] = b
 
         txn.commit()

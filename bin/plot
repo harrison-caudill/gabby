@@ -228,8 +228,7 @@ if __name__ == '__main__':
                                      full_db_path=full_db_path,
                                      frag_db_path=frag_db_path,
                                      cache_dir=cache_dir)
-        plotter.plot_prediction()
-        #plotter.plot(n_threads=args.n_threads)
+        plotter.plot(n_threads=args.n_threads)
 
     elif args.plot_type == 'bstar':
         plotter = gabby.BStarPlotter(cfg=cfg['general'],
@@ -238,8 +237,7 @@ if __name__ == '__main__':
                                      img_dir=img_dir,
                                      full_db_path=full_db_path,
                                      frag_db_path=frag_db_path)
-        #plotter.plot(n_threads=args.n_threads)
-        plotter.plot_prediction()
+        plotter.plot(n_threads=args.n_threads)
 
     else:
         logging.critical(f"WHAT DID YOU DO??? {args.plot_type}")

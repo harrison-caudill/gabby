@@ -178,14 +178,14 @@ class GabbyPlotter(object):
         cursor = txn.cursor(db=self.full_scope)
         cursor.set_range(des.encode())
         key, scope = cursor.item()
-        start, end = struct.unpack('ii', scope)
+        start, end = unpack_scope(scope)
 
         key = fmt_key(end, des)
         tmp = txn.get(key, db=self.full_apt)
         if not tmp:
             key = fmt_key(start, des)
             tmp = txn.get(key, db=self.full_apt)
-        a, p, t, = struct.unpack('fff', tmp)
+        a, p, t, = unpack_apt(tmp)
         del cursor
         return (a, p, t,)
 
@@ -199,26 +199,35 @@ class GabbyPlotter(object):
                                                 cache_dir=self.cache_dir)
 
         (moral_decay,
-         bins_A,
-         bins_P,) = jazz.decay_rates(apt, deriv, N,
-                                     n_A_bins=50,
-                                     n_P_bins=50,
-                                     n_D_bins=50)
+         bins_A, bins_P,
+         Ap, Ad, Pp, Pd,) = jazz.decay_rates(apt, deriv, N)
 
-        for i in range(len(moral_decay)):
-            for j in range(len(moral_decay[i])):
-                i = 0
-                j = 0
-                fig = plt.figure(figsize=(12, 8))
-                #ax.pcolormesh(bins_A, bins_P, np)
-                fig.set_dpi(self.tgt.getint('dpi'))
-                ax = fig.add_subplot(1, 1, 1)
-                ax.plot(bins_A, moral_decay[i][j][0])
-                fig.savefig('output/wat.png')
-                sys.exit(0)
-                
+        n_A_bins = self.cfg.getint('n-apogee-bins')
+        n_P_bins = self.cfg.getint('n-perigee-bins')
+        n_D_bins = self.cfg.getint('n-deriv-bins')
 
-        sys.exit(0)
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.hist(Ap, bins=n_A_bins+2)
+        fig.savefig(os.path.join(self.output_dir, 'Ap_hist.png'))
+
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.hist(Pp, bins=n_P_bins+2)
+        fig.savefig(os.path.join(self.output_dir, 'Pp_hist.png'))
+
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.hist(Ad, bins=n_D_bins+2)
+        fig.savefig(os.path.join(self.output_dir, 'Ad_hist.png'))
+
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.hist(Pd, bins=n_D_bins+2)
+        fig.savefig(os.path.join(self.output_dir, 'Pd_hist.png'))
+
+        
+
 
         tmp = np.concatenate(Ad)
 
@@ -231,7 +240,6 @@ class GabbyPlotter(object):
         ax.hist(tmp, bins=100)
         fig.savefig('output/wat.png')
         sys.exit(0)
-
 
     def plot(self, n_threads=1):
         """Produces the images, but not the video.
@@ -292,7 +300,7 @@ class GabbyPlotter(object):
             if des in mask: continue
             for prefix in target_des:
                 if des.startswith(prefix):
-                    start, end = struct.unpack('ii', scope)
+                    start, end = unpack_scope(scope)
                     scope_start[des] = start
                     scope_end[des] = end
 
@@ -380,7 +388,11 @@ class GabbyPlotter(object):
                         txn,
                         scope_start, scope_end,
                         start_d, end_d,
-                        dt):
+                        dt,
+                        fwd_propagate=False,
+                        rev_propagate=False):
+        """Loads/computes the plot data.
+        """
 
         # Initialize our main cursor
         cursor = txn.cursor(db=self.frag_idx)
@@ -446,18 +458,45 @@ class GabbyPlotter(object):
                     after_ts[j][i] = ts
                     tgt_ts[j][i] = next_ts
                     if prev_v:
-                        A, P, T = struct.unpack('fff', prev_v)
+                        A, P, T = unpack_apt(prev_v)
                         before_A[j][i] = A
                         before_P[j][i] = P
                         before_T[j][i] = T
                         before_ts[j][i] = prev_ts
-                        A, P, T = struct.unpack('fff', v)
+                        A, P, T = unpack_apt(v)
                         after_A[j][i] = A
                         after_P[j][i] = P
                         after_T[j][i] = T
 
                     next_ts += dt_s
                     j += 1
+
+        # if fwd_prop:
+        #     jazz = Jazz(self.cfg,
+        #                 self.frag_env,
+        #                 self.frag_apt,
+        #                 self.frag_tle,
+        #                 self.frag_scope)
+        #     frags, apt, deriv, N = jazz.derivatives(fltr=jazz.lpf(),
+        #                                             cache_dir=self.cache_dir)
+        #     (moral_decay,
+        #      bins_A, bins_P,
+        #      Ap, Ad, Pp, Pd,) = jazz.decay_rates(apt, deriv, N)
+        #     n_A = len(bins_A)
+        #     n_P = len(bins_P)
+        #     n_D = len(moral_decay[0][0][0])
+
+        #     # Randomly select a percentile bin for each fragment
+        #     frag_percentiles = np.array(L, dtype=np.int)
+        #     for i in range(L):
+        #         frag_percentiles[i] = np.random.randint(0, n_D)
+
+        #     n = FIXME # number of states to propagate forward
+        #     prop = np.zeros((L, n), dtype=np.int)
+
+        #     for i in range(L):
+        #         # start with the most recent observation
+                
 
         logging.info(f"  Computing temporal offsets")
         dt = after_ts - before_ts

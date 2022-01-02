@@ -1,15 +1,22 @@
 #!/usr/bin/env python
 
 import argparse
+import configparser
+import datetime
 import logging
+import matplotlib
+import matplotlib.pyplot as plt
 import os
+import shutil
 import sys
 
 import gabby
 
 
 if __name__ == '__main__':
-    desc = """Ingests data from either local disk or the web.
+    desc = """Testing utility.
+
+Right now, it just builds fake DBs.
     """
 
     formatter = argparse.RawTextHelpFormatter
@@ -22,7 +29,7 @@ if __name__ == '__main__':
                         dest='full_db_path',
                         required=False,
                         type=str,
-                        default='output/tle.db',
+                        default='output/test_full.db',
                         help='Location of the full lmdb (%(default)s)')
 
     parser.add_argument('--fragment-db-path', '-a',
@@ -31,13 +38,35 @@ if __name__ == '__main__':
                         dest='frag_db_path',
                         required=False,
                         type=str,
-                        default='output/fragments.db',
+                        default='output/test_frag.db',
                         help='Location of the fragments lmdb (%(default)s)')
 
-    parser.add_argument('--force', '-f',
-                        action='store_true',
-                        dest='force',
-                        help='Re-import even if present (%(default)s)')
+    parser.add_argument('--config-file', '-c',
+                        metavar='CONFIG_PATH',
+                        action='store',
+                        dest='cfg',
+                        required=False,
+                        type=str,
+                        default='cfg/test.cfg',
+                        help='Path to the config file (%(default)s)')
+
+    parser.add_argument('--target', '-t',
+                        metavar='TARGET',
+                        action='store',
+                        dest='tgt',
+                        required=False,
+                        type=str,
+                        default='single',
+                        help='The config target (%(default)s)')
+
+    parser.add_argument('--num-threads', '-n',
+                        metavar='NUM_THREADS',
+                        action='store',
+                        dest='n_threads',
+                        required=False,
+                        type=int,
+                        default=1,
+                        help='The number of threads to use (%(default)s)')
 
     parser.add_argument('--output-directory', '-o',
                         metavar='OUTPUT_DIR',
@@ -45,33 +74,15 @@ if __name__ == '__main__':
                         dest='output_dir',
                         required=False,
                         type=str,
-                        default='output',
+                        default='output/%(tgt)s',
                         help='Output directory (%(default)s)',)
-
-    parser.add_argument('--designator-base', '-D',
-                        metavar='DESIGNATOR',
-                        action='store',
-                        dest='designator',
-                        required=False,
-                        type=str,
-                        help='Base designator to focus snarfing (%(default)s)',)
-
-    parser.add_argument('--store-tles', '-s',
-                        action='store_true',
-                        dest='store_tles',
-                        help='Store the full TLE information (%(default)s)',)
-
-    parser.add_argument('--index', '-I',
-                        action='store_true',
-                        dest='index',
-                        help='Build the indexes rather than snarf',)
 
     parser.add_argument('--log-file', '-l',
                         metavar='LOG_FILE',
                         action='store',
                         dest='log_file',
                         type=str,
-                        default='%(output_dir)s/snarf-%(fname)s.log',
+                        default='%(output_dir)s/test.log',
                         help='Logfile in output directory (%(default)s)')
 
     parser.add_argument('--log-level', '-L',
@@ -87,23 +98,25 @@ if __name__ == '__main__':
                                  'debug'],
                         help='Log level to use (%(default)s)')
 
-    parser.add_argument('tle_path',
-                        metavar='TLE_PATH',
-                        nargs='?',
+    parser.add_argument('cmd',
+                        metavar='COMMAND',
                         action='store',
                         type=str,
-                        help='File to snarf in')
+                        choices=['build',],
+                        help='Command to execute')
+
 
     args = parser.parse_args()
 
 
     arg_dict = {
-        'fname': os.path.basename(args.tle_path),
+        'tgt': args.tgt
         }
 
     # Get our output directory all set up
     output_dir = args.output_dir % arg_dict
     arg_dict['output_dir'] = output_dir
+
     gabby.mkdir_p(output_dir)
 
     # Get set up to log
@@ -112,24 +125,27 @@ if __name__ == '__main__':
                         log_level=args.log_level)
     logging.info(f"Giddy up, Gabby!")
 
-    # Go find the undertaker
+    # Load the config file
+    logging.info(f"Loading config file: {args.cfg}")
+    cfg = configparser.ConfigParser(allow_no_value=True)
+    cfg.read(args.cfg)
+
+    # Disable interactive mode in matplotlib to speed up plot
+    # generation and save memory
+    plt.ioff()
+    matplotlib.use('TkAgg')
+
     full_db_path = args.full_db_path % arg_dict
     frag_db_path = args.frag_db_path % arg_dict
-    under = gabby.Undertaker(full_db_path=full_db_path,
-                             frag_db_path=frag_db_path)
-    logging.info("The Undertaker is In")
 
-    if args.index:
-        under.index_db()
+    if args.cmd == 'build':
+        tgt = cfg['db-'+args.tgt]
 
-    elif args.tle_path:
-        if args.tle_path.endswith('json'):
-            under.load_json(args.tle_path,
-                            base_des=args.designator,
-                            store_tles=args.store_tles,
-                            force=args.force)
-        else:
-            under.load_tlefile(args.tle_path,
-                               base_des=args.designator,
-                               store_tles=args.store_tles,
-                               force=args.force)
+        faker = gabby.FakeDB(cfg, tgt,
+                             output_dir=output_dir,
+                             full_path=full_db_path,
+                             frag_path=frag_db_path)
+        faker.build_norm()
+
+    else:
+        logging.critical(f"WHAT DID YOU DO??? {args.cmd}")
