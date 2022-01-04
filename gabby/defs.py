@@ -68,7 +68,8 @@ def parse_date(timestr):
     """Parses a time string and returns the internal integer timestamp.
     """
     # repeated here to ensure explicit assignment of timezone
-    fmt = '%Y-%m-%d %H:%M:%S-%z'
+    timestr += '-+0000'
+    fmt = DATE_FMT + '-%z'
     return dt_to_ts(datetime.datetime.strptime(timestr + '-+0000', fmt))
 
 def fmt_key(ts=None, des=None):
@@ -101,7 +102,7 @@ def unpack_scope(val):
 def pack_scope(start=None, end=None):
     """Packs values for a scope-table entry.
     """
-    return struct.pack(SCOPE_STRUCT_FMT, val)
+    return struct.pack(SCOPE_STRUCT_FMT, start, end)
 
 def unpack_tle(val):
     """Unpacks a binary string for a tle-table entry.

@@ -10,6 +10,7 @@ import tempfile
 
 from .defs import *
 from .utils import *
+from .db import GabbyDB
 from .undertaker import Undertaker
 
 class FakeDB(object):
@@ -18,31 +19,14 @@ class FakeDB(object):
 
     def __init__(self, cfg, tgt,
                  output_dir=None,
-                 full_path=None,
-                 frag_path=None):
+                 db_path=None):
 
         # If we want it to persist, we pass in a directory, otherwise
         # we generate a tempdir here
-        if not full_path: full_path = tempfile.TemporaryDirectory().name
-        if not frag_path: frag_path = tempfile.TemporaryDirectory().name
-        self.full_path = full_path
-        self.frag_path = frag_path
-
+        if not db_path: db_path = tempfile.TemporaryDirectory().name
+        self.db_path = db_path
+        self.db = GabbyDB(path=db_path)
         self.output_dir = output_dir
-
-        self.full_env = lmdb.Environment(self.full_path,
-                                         max_dbs=N_DBS,
-                                         map_size=DB_MAX_LEN)
-        self.full_tle = self.full_env.open_db(DB_NAME_TLE.encode())
-        self.full_apt = self.full_env.open_db(DB_NAME_APT.encode())
-        self.full_scope = self.full_env.open_db(DB_NAME_SCOPE.encode())
-
-        self.frag_env = lmdb.Environment(frag_path,
-                                         max_dbs=N_DBS,
-                                         map_size=DB_MAX_LEN)
-        self.frag_tle = self.frag_env.open_db(DB_NAME_TLE.encode())
-        self.frag_apt = self.frag_env.open_db(DB_NAME_APT.encode())
-        self.frag_scope = self.frag_env.open_db(DB_NAME_SCOPE.encode())
 
         self.cfg = cfg
         self.tgt = tgt
@@ -70,17 +54,18 @@ class FakeDB(object):
         des = self.tgt['single-intldes']
         A0 = self.tgt.getfloat('single-A')
         P0 = self.tgt.getfloat('single-P')
-        t0_date = parse_date(self.tgt['start-date'])
-        t0 = int(t0_date.timestamp())
+        t0_date = parse_date(self.tgt['single-start'])
+        t0 = dt_to_ts(t0_date)
         L0 = self.tgt.getint('single-life')
         h1 = self.tgt.getfloat('single-decay-alt')
 
 
         if 'single-output' in self.tgt:
             dirname = self.output_dir
+            fname = self.tgt['single-output'] % {'des':des}
             if dirname: output = os.path.join(dirname, fname)
             else: output = fname
-            fname = self.tgt['single-output'] % {'des':des}
+        else: output = None
 
         logging.info(f"Building single satellite fragment:")
         logging.info(f"  Designator: {des}")
@@ -93,6 +78,54 @@ class FakeDB(object):
         t, A, P, T = self._fake_sat(A0, P0, t0, L0,
                                     decay_alt=h1,
                                     output_path=output)
+        self._fill_apt(des, zip(t, A, P, T))
+
+    def build_linear(self):
+        """Builds and stores the tAPT values for a single linear-decay.
+
+        Pretty similar to the build_single method, but instead of
+        trying to sorta look like a decay profile, it's just a couple
+        of straight lines.  That makes derivative computations (read:
+        verifications) easy.
+
+        Consumes:
+          * linear-intldes
+          * linear-A
+          * linear-P
+          * linear-life
+          * linear-start
+          * linear-output
+          * linear-decay-alt
+        """
+
+        des = self.tgt['linear-intldes']
+        A0 = self.tgt.getfloat('lienar-A')
+        P0 = self.tgt.getfloat('linear-P')
+        t0_date = parse_date(self.tgt['linear-start'])
+        t0 = dt_to_ts(t0_date)
+        L0 = self.tgt.getint('linear-life')
+        h1 = self.tgt.getfloat('linear-decay-alt')
+
+
+        if 'linear-output' in self.tgt:
+            dirname = self.output_dir
+            fname = self.tgt['linear-output'] % {'des':des}
+            if dirname: output = os.path.join(dirname, fname)
+            else: output = fname
+        else: output = None
+
+        logging.info(f"Building satellite fragment with linear decay:")
+        logging.info(f"  Designator: {des}")
+        logging.info(f"  Apogee:     {A0}")
+        logging.info(f"  Perigee:    {P0}")
+        logging.info(f"  Lifetime:   {L0}")
+        logging.info(f"  Decay Alt:  {h1}")
+        logging.info(f"  Start Date: {t0_date}")
+
+        t = np.linspace(0, L0, L0)
+        A = np.linspace(A0, h1, L0)
+        P = np.linspace(P0, h1, L0)
+        T = self._T(A, P)
         self._fill_apt(des, zip(t, A, P, T))
 
     def build_norm(self):
@@ -137,6 +170,23 @@ class FakeDB(object):
             self._fill_apt(des, zip(tapt))
             assert(False) # Unimplemented
 
+    def _T(self, A, P):
+        Re = (astropy.constants.R_earth/1000.0).value
+        RA = A+Re
+        RP = P+Re
+        e = (RA-RP) / (RA+RP)
+
+        # These are all in meters
+        a = 1000*(RA+RP)/2
+        mu = astropy.constants.GM_earth.value
+        T = 2 * np.pi * (a**3/mu)**.5
+        # T is now in seconds
+
+        T /= 60.0
+        # T is now in minutes which is waht the DB expects
+
+        return T
+
     def _fake_sat(self, A0, P0, t0, lifetime,
                   decay_alt=100,
                   moon_wobble_amp=2,
@@ -162,20 +212,7 @@ class FakeDB(object):
 
         A = base + A_correction + moon_wobble
         P = base + moon_wobble
-
-        Re = (astropy.constants.R_earth/1000.0).value
-        RA = A+Re
-        RP = P+Re
-        e = (RA-RP) / (RA+RP)
-
-        # These are all in meters
-        a = 1000*(RA+RP)/2
-        mu = astropy.constants.GM_earth.value
-        T = 2 * np.pi * (a**3/mu)**.5
-        # T is now in seconds
-
-        T /= 60.0
-        # T is now in minutes which is waht the DB expects
+        T = self._T(A, P)
 
         if output_path: plot_apt(frag, (t, A, P, T), output_path)
 
@@ -195,16 +232,16 @@ class FakeDB(object):
         Imports the APT values to the DB, then builds the scope index.
         """
 
-        txn = lmdb.Transaction(self.full_env, write=True)
+        txn = self.db.txn(write=True)
         for wat in tapt:
             ts, A, P, T, = wat
 
             key = fmt_key(des=frag, ts=ts)
             apt_bytes = pack_apt(A=A, P=P, T=T)
             txn.put(key, apt_bytes,
-                    db=self.full_apt,
+                    db=self.db.db_apt,
                     overwrite=True)
         txn.commit()
 
-        undertaker = Undertaker(db_path=self.full_path)
+        undertaker = Undertaker(db_path=self.db_path)
         undertaker.index_db()

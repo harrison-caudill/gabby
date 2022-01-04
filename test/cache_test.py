@@ -6,15 +6,8 @@ import pprint
 import pytest
 import tempfile
 
-import gabby.cache
+from fixtures import *
 
-
-@pytest.fixture
-def cache():
-    td = tempfile.TemporaryDirectory()
-    tmp = gabby.cache.GabbyCache(td.name)
-    setattr(tmp, '__tmpdir', td)
-    return tmp
 
 class TestCache(object):
 

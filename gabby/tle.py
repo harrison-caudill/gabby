@@ -1,4 +1,7 @@
 
+import datetime
+import math
+
 class TLE(object):
     """Internal representation of a TLE.
 
@@ -73,8 +76,8 @@ class TLE(object):
         self.classification = classification
         assert('U' == classification)
 
-        self.intldes = f"%2.2d%3.3d%s" % (
-            launch_year, launch_number, launch_piece)
+        self.intldes = f"%s%3.3d%s" % (
+            ('%4.4d'%(launch_year))[-2:], launch_number, launch_piece)
 
         self.launch_year = launch_year
         self.launch_number = launch_number
@@ -210,7 +213,7 @@ class TLE(object):
             self.classification,
             ' ',
 
-            str(self.launch_year % 100),
+            '%2.2d' % (self.launch_year % 100),
             '%-3.3d' % self.launch_number,
             '%-3.3s' % self.launch_piece,
             ' ',

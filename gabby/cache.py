@@ -26,12 +26,8 @@ class GabbyCache(object):
     capabilities.
 
     The data will be stored as follows:
-    <cache-dir>/<name>/user.pickle -- user-supplied metadata
-    <cache-dir>/<name>/meta.pickle -- cache-system metadata
-    <cache-dir>/<name>/0.np -- 1st numpy array
-    <cache-dir>/<name>/1.np -- 2nd numpy array
-    ...
-    <cache-dir>/<name>/(N-1).np -- Nth numpy array
+    <cache-dir>/<name>/meta.pickle -- user-supplied metadata
+    <cache-dir>/<name>/data.np -- numpy arrays
     """
 
     def __init__(self, path):
