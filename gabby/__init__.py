@@ -6,6 +6,7 @@ from .bstar_plotter import BStarPlotter
 from .transformer import Jazz
 from .tle import TLE
 from .faker import FakeDB
+from .propagator import keplerian_period
 
 from .defs import *
 

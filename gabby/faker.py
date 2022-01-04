@@ -23,7 +23,9 @@ class FakeDB(object):
 
         # If we want it to persist, we pass in a directory, otherwise
         # we generate a tempdir here
-        if not db_path: db_path = tempfile.TemporaryDirectory().name
+        if not db_path:
+            self.__tempdir = tempfile.TemporaryDirectory()
+            db_path = self.__tempdir.name
         self.db_path = db_path
         self.db = GabbyDB(path=db_path)
         self.output_dir = output_dir
@@ -243,5 +245,5 @@ class FakeDB(object):
                     overwrite=True)
         txn.commit()
 
-        undertaker = Undertaker(db_path=self.db_path)
-        undertaker.index_db()
+        undertaker = Undertaker(db=self.db)
+        undertaker.build_scope()

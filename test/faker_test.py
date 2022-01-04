@@ -8,11 +8,13 @@ import pytest
 import sys
 
 import gabby
+from fixtures import *
 
 class TestFaker(object):
 
-    def test_fill_apt(self):
-        faker = gabby.FakeDB(None, None)
+    def test_fill_apt(self, single_faker):
+
+        faker = single_faker
 
         L = 2
         frag = '99025'
@@ -28,9 +30,8 @@ class TestFaker(object):
         for v in zip(t, A, P, T): print(v)
 
         # The loaded values should be sorted
-        txn = lmdb.Transaction(faker.full_env, write=False)
-        wat = gabby.load_apt([frag], txn, faker.full_apt)
-        pprint.pprint(wat)
+        txn = faker.db.txn()
+        wat = faker.db.load_apt([frag])
         tr, Ar, Pr, Tr, Nr = wat
 
         A.sort(reverse=True)
