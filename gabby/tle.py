@@ -219,7 +219,7 @@ class TLE(object):
             ' ',
 
             str(self.epoch.year % 100),
-            '%3.3d.%d' % (epoch_day, day_fraction * 1e8),
+            '%3.3d.%8.8d' % (epoch_day, day_fraction * 1e8),
             ' ',
 
             self._ndot_stringify(self.ndot / 2.0, l=12),

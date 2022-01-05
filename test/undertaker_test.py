@@ -84,7 +84,12 @@ class TestUndertaker(object):
             cat_number += 1
             launch_number += 1
             test_tles.append(t)
-            fd.write('\n'.join(str(t).split('\n')[-2:]) + '\n')
+            lines = str(t).split('\n')
+            tlestr = ''.join([
+                lines[1], '\\', '\n',
+                lines[2], '\n',
+                ])
+            fd.write(tlestr)
         fd.close()
         undertaker.load_tlefile(tlefile.name, store_tles=True)
 

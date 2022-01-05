@@ -4,11 +4,7 @@ import numpy as np
 import pytest
 
 import gabby
-
-
-@pytest.fixture
-def jazzercise():
-    jazz = gabby.Jazz(None, None, None, None, None)
+from fixtures import *
 
 
 class TestTransformer(object):
@@ -42,7 +38,7 @@ class TestTransformer(object):
         frac = .1
         off = int(frac*N)
 
-        a, b = jazzercise._percentile_values(dist, frac)
+        a, b = jazzercise._percentile_values(dist, frac, frac)
 
         dist_sorted = np.sort(dist)
         A = dist_sorted[off]
@@ -53,14 +49,17 @@ class TestTransformer(object):
     def test_clip_to_flanks(self, jazzercise):
 
         arr = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=np.float32)
-        c_min, c_max, step, res = jazzercise.clip_to_flanks(arr, 6)
+        c_min, c_max, step, res = jazzercise.clip_to_flanks(arr, 6,
+                                                            low_clip=.2,
+                                                            high_clip=.2)
         correct = np.array([2.1, 2.1, 3, 4, 5, 6, 7, 8, 8.9, 8.9],
                            dtype=np.float32)
-        print(res)
         assert(0 == len(np.trim_zeros(res - correct)))
 
         arr = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=np.float32)
         c_min, c_max, step, res = jazzercise.clip_to_flanks(arr, 5,
+                                                            low_clip=.2,
+                                                            high_clip=.2,
                                                             max_val=7)
         correct = np.array([2.1, 2.1, 3, 4, 5, 6, 7, 7.9, 7.9, 7.9],
                            dtype=np.float32)

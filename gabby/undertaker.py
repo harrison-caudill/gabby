@@ -81,7 +81,7 @@ class Undertaker(object):
         offsets = self._build_calendar_offsets()
 
         logging.info(f"  Importing json data from {path}")
-        txn = lmdb.Transaction(self.full_env, write=True)
+        txn = self.db.txn(write=True)
 
         with open(path, 'r') as fd: data = json.load(fd)
 
@@ -97,7 +97,7 @@ class Undertaker(object):
             apt_bytes = pack_apt(A=apogee, P=perigee, T=period)
 
             txn.put(key, apt_bytes,
-                    db=self.full_apt,
+                    db=self.db.db_apt,
                     overwrite=True)
 
             n = float(datum['MEAN_MOTION'])
@@ -116,7 +116,7 @@ class Undertaker(object):
                                  raan=raan, ecc=ecc, argp=argp,
                                  mean_anomaly=mean_anomaly, rev_num=rev_num)
             txn.put(key, tle_bytes,
-                    db=self.full_tle,
+                    db=self.db.db_tle,
                     overwrite=True)
 
     def load_tlefile(self, path, store_tles=False, base_des=None, force=False):
@@ -266,12 +266,12 @@ class Undertaker(object):
 
     def build_scope(self):
         logging.info("Annotating Fragment Scope Table")
-        txn = lmdb.Transaction(self.full_env, write=True)
+        txn = self.db.txn(write=True)
 
         N = 0
 
         # Cursor to walk the DB
-        cursor = txn.cursor(db=self.db_apt)
+        cursor = txn.cursor(db=self.db.db_apt)
 
         # First key to initialize things:
         cursor.first()
@@ -290,7 +290,7 @@ class Undertaker(object):
                 if cur_des:
                     reg = pack_scope(start=first_ts, end=last_ts)
                     txn.put(cur_des.encode(), reg,
-                            db=self.db_scope,
+                            db=self.db.db_scope,
                             overwrite=True)
                 cur_des = des
                 first_ts = ts
@@ -307,7 +307,7 @@ class Undertaker(object):
             while txn.delete(cur_des.encode()): pass
             reg = pack_scope(start=first_ts, end=last_ts)
             txn.put(cur_des.encode(), reg,
-                    db=self.db_scope,
+                    db=self.db.db_scope,
                     overwrite=True)
 
         txn.commit()

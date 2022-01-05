@@ -31,7 +31,7 @@ def single_faker(cfg):
 
 @pytest.fixture
 def jazzercise():
-    jazz = gabby.Jazz(None, None, None, None, None)
+    return gabby.Jazz(None, None, None, None, None)
 
 @pytest.fixture
 def undertaker(single_faker):

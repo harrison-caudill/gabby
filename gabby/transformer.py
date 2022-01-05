@@ -71,6 +71,7 @@ class Jazz(object):
 
     def lifetime_stats(self,
                        cutoff,
+                       priors=None,
                        n_apogee=5,
                        n_perigee=5,
                        n_time=5,
@@ -92,7 +93,8 @@ class Jazz(object):
         min_life: only consider fragments with a minimum lifetime (days)
         """
 
-        prior_des = self._prior_des()
+        if priors: prior_des = priors
+        else: prior_des = self._prior_des()
 
         # Only need a read-only transaction for this
         txn = lmdb.Transaction(self.db_env, write=False)
@@ -242,6 +244,7 @@ class Jazz(object):
         return fltr
 
     def derivatives(self,
+                    priors=None,
                     dP=1,
                     min_life=1.0,
                     dt=SECONDS_IN_DAY,
@@ -250,25 +253,13 @@ class Jazz(object):
         """Finds A'(P), and P'(P)
         """
 
-        if cache_dir:
-            cache_data_path = os.path.join(cache_dir, "deriv_data.np")
-            cache_meta_path = os.path.join(cache_dir, "deriv_meta.pickle")
-            if os.path.exists(cache_data_path):
-                with open(cache_data_path, 'rb') as fd:
-                    logging.info(f"Loading derivatives from: {cache_data_path}")
-                    pos = np.load(fd)
-                    deriv = np.load(fd)
-                    N = np.load(fd)
-                with open(cache_meta_path, 'rb') as fd:
-                    meta = pickle.load(fd)
-                return meta['fragments'], pos, deriv, N
-
         start_time = datetime.datetime.now()
 
         # Only need a read-only transaction for this
         txn = lmdb.Transaction(self.db_env, write=False)
 
-        base_des = self._prior_des()
+        if priors: base_des = priors
+        else: base_des = self._prior_des()
         fragments = find_daughter_fragments(base_des, txn, self.db_scope)
 
         L = len(fragments)
@@ -332,26 +323,6 @@ class Jazz(object):
 
         elapsed = int((end_time-start_time).seconds * 10)/10.0
         logging.info(f"  Finished finding derivatives in {elapsed} seconds")
-
-        # Cache the values
-        if cache_dir:
-            cache_data_path = os.path.join(cache_dir, "deriv_data.np")
-            cache_meta_path = os.path.join(cache_dir, "deriv_meta.pickle")
-            with open(cache_data_path, 'wb') as fd:
-                logging.info(f"Saving derivatives to: {cache_data_path}")
-                np.save(fd, ret_filtered)
-                np.save(fd, ret_deriv)
-                np.save(fd, N)
-            with open(cache_meta_path, 'wb') as fd:
-                meta = {
-                    'dP': dP,
-                    'min_life': min_life,
-                    'dt': dt,
-                    'fltr': fltr,
-                    'base': base_des,
-                    'fragments': fragments,
-                    }
-                pickle.dump(meta, fd)
 
         retval = (fragments, ret_filtered, ret_deriv, N)
         return retval
@@ -423,10 +394,6 @@ class Jazz(object):
 
         step = (clip_max-clip_min)/(n_bins-1)
 
-        print((clip_max-clip_min), n_bins, (clip_max-clip_min)/(n_bins-1))
-
-
-
         # We're going to clip the values to ensure they fall into one
         # of the flanking bins.  That lets us use exactly the same
         # machinery later on during the binning process but without
@@ -449,7 +416,8 @@ class Jazz(object):
         tmp = np.round(tmp, decimals=0).astype(np.int) + 1
         return tmp
 
-    def decay_rates(self, positions, derivatives, Ns):
+    def decay_rates(self, positions, derivatives, Ns,
+                    mesh_output=None):
         """Bins the decay rate distributions.
 
         retval: [A'=0,P'=1][A-bin][P-bin][D-bin] = d(A/P)/dt
@@ -584,16 +552,17 @@ class Jazz(object):
         end = datetime.datetime.now().timestamp()
         logging.info(f"    Binning took: {int((end-start)*1000)}ms")
 
-        Z = np.zeros((n_A_bins, n_P_bins), dtype=np.int)
-        for i in range(n_A_bins):
-            for j in range(n_P_bins):
-                Z[i][j] = np.sum(moral_decay[0][i][j])
+        if mesh_output:
+            Z = np.zeros((n_A_bins, n_P_bins), dtype=np.int)
+            for i in range(n_A_bins):
+                for j in range(n_P_bins):
+                    Z[i][j] = np.sum(moral_decay[0][i][j])
 
-        # fig = plt.figure(figsize=(12, 8))
-        # ax = fig.add_subplot(1, 1, 1)
-        # c =ax.pcolor(Z)
-        # fig.colorbar(c, ax=ax)
-        # fig.savefig('output/Ad_mesh.png')
+            fig = plt.figure(figsize=(12, 8))
+            ax = fig.add_subplot(1, 1, 1)
+            c = ax.pcolor(Z)
+            fig.colorbar(c, ax=ax)
+            fig.savefig(mesh_output)
 
         bins_A = np.linspace(Ad_min, Ad_max, n_D_bins)
         bins_P = np.linspace(Pd_min, Pd_max, n_D_bins)
