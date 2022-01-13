@@ -184,7 +184,7 @@ class GabbyDB(object):
         logging.info(f"  Building new {typ} transaction")
         return True, lmdb.Transaction(self.env, write=write)
 
-    def load_scope(base, txn=None):
+    def load_scope(self, base, txn=None):
         """Loads the start and ending observation times for all daughters.
 
         base: [<str>, ...]
@@ -213,16 +213,17 @@ class GabbyDB(object):
     def get_latest_apt(self, txn, des):
         """Returns the latest APT for the given designator
         """
-        cursor = txn.cursor(db=self.full_scope)
+        cursor = txn.cursor(db=self.db_scope)
+
         cursor.set_range(des.encode())
         key, scope = cursor.item()
         start, end = unpack_scope(scope)
 
         key = fmt_key(end, des)
-        tmp = txn.get(key, db=self.full_apt)
+        tmp = txn.get(key, db=self.db_apt)
         if not tmp:
             key = fmt_key(start, des)
-            tmp = txn.get(key, db=self.full_apt)
+            tmp = txn.get(key, db=self.db_apt)
         a, p, t, = unpack_apt(tmp)
         del cursor
         return (a, p, t,)

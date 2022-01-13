@@ -28,15 +28,22 @@ If we bin evenly across the entire range, then we run the risk of
 allowing outliers (e.g. below) to force the bulk of the observations
 to be crowded:
 
- #
- #
- #
- #
- #
-###                                           #
+|  #
+|  #
+|  #
+| ###                         #
++-------------------------------
 
 For the moment, we're still going to do uniform spacing of bins at
-roughly 1km intervals which is assumed to be the materiality threshold.
+roughly 1km intervals which is assumed to be the materiality
+threshold.  We're also going to clip outliers.
+
+|      #
+|     ###
+|   #######
+| ################
++------------------
+
 """
 
 
@@ -50,8 +57,25 @@ class MoralDecay(object):
       combination of A/P A and
     """
 
-    def __init__(self, decay_hist, cdf, pct, bins_A, bins_P, Ap, Ad, Pp, Pd):
-        pass
+    def __init__(self, decay_hist, Ap, Ad, Pp, Pd):
+        self.bins_A = np.linspace(Ad_min, Ad_max, n_D_bins)
+        self.bins_P = np.linspace(Pd_min, Pd_max, n_D_bins)
+
+    def _cdf():
+        # CDF
+        cdf = np.copy(moral_decay)
+        for i in range(n_A):
+            for j in range(n_P):
+                cdf[0][i][j] = np.cumsum(cdf[0][i][j])
+                cdf[1][i][j] = np.cumsum(cdf[1][i][j])
+
+    def _percentiles():
+        # Percentiles
+        pct = np.copy(cdf)
+        for i in range(n_A):
+            for j in range(n_P):
+                pct[0][i][j] = self._inverse(pct[0][i][j])
+                pct[1][i][j] = self._inverse(pct[1][i][j])
 
 
 class Jazz(object):
@@ -236,6 +260,10 @@ class Jazz(object):
         return Xr, Yr
 
     def lpf(self):
+        """A basic low-pass filter for decay rates.
+
+        Assumes samp_rate == 1 day
+        """
         k = 10000
         n_taps = 127
         fltr = np.arange(-1*(n_taps//2), n_taps//2+1, 1) * np.pi / k
@@ -416,78 +444,26 @@ class Jazz(object):
         tmp = np.round(tmp, decimals=0).astype(np.int) + 1
         return tmp
 
-    def decay_rates(self, positions, derivatives, Ns,
-                    mesh_output=None):
-        """Bins the decay rate distributions.
+    def __concat_and_digitize(self, positions, derivatives, Ns, off, n_bins,
+                              min_val=None, max_val=None,
+                              low_clip=None, high_clip=None):
 
-        retval: [A'=0,P'=1][A-bin][P-bin][D-bin] = d(A/P)/dt
+        p = self.__concatenate(positions, Ns, subkeys=[off])
+        p_min, p_max, dp, p = self.clip_to_flanks(p, n_bins,
+                                                  min_val=min_val,
+                                                  max_val=max_val)
+        p = self._flanking_digitize(p, p_min, dp)
 
-        dt is defined in the call to derivatives() defaulting to 1 day.
+        d = self.__concatenate(derivatives, Ns, subkeys=[off])
+        d_min, d_max, dd, d = self.clip_to_flanks(Ad, n_D_bins,
+                                                  low_clip=low_clip,
+                                                  high_clip=high_clip)
+        d = self._flanking_digitize(d, d_min, dd)
 
-        positions: [frag-number][off][0] = time
-                   [frag-number][off][1] = apogee value
-                   [frag-number][off][2] = perigee value
+        return (p_min, p_max, dp, p,
+                d_min, d_max, dd, d,)
 
-        derivatives: same as positions, but it's (d/dt)(A|P) and same time vals
-        """
-
-        cfg = self.cfg
-        Ap_min = cfg.getint('min-apogee')
-        Ap_max = cfg.getint('max-apogee')
-        Ad_prune_low = cfg.getfloat('apogee-deriv-low-prune')
-        Ad_prune_high = cfg.getfloat('apogee-deriv-high-prune')
-
-        Pp_min = cfg.getint('min-perigee')
-        Pp_max = cfg.getint('max-perigee')
-        Pd_prune_low = cfg.getfloat('perigee-deriv-low-prune')
-        Pd_prune_high = cfg.getfloat('perigee-deriv-high-prune')
-
-        n_A_bins = cfg.getint('n-apogee-bins')
-        n_P_bins = cfg.getint('n-perigee-bins')
-        n_D_bins = cfg.getint('n-deriv-bins')
-
-        # Useful numbers
-        L = len(positions)
-        N = np.sum(Ns)
-
-        logging.info(f"Quantifying Moral Decay from {N} samples")
-
-        # FIXME: Any normalization steps for things like B* compared
-        # to mean would happen at this stage.
-
-        # We don't care about fragment separation so just concatenate
-        # everything
-        logging.info("  Concatenating all values into single arrays")
-        Ap = self.__concatenate(positions, Ns, subkeys=[1])
-        Pp = self.__concatenate(positions, Ns, subkeys=[2])
-        Ad = self.__concatenate(derivatives, Ns, subkeys=[1])
-        Pd = self.__concatenate(derivatives, Ns, subkeys=[2])
-
-        logging.info("  Clipping the values")
-        (Ap_min, Ap_max,
-         Ap_step, Ap) = self.clip_to_flanks(Ap, n_A_bins,
-                                            min_val=Ap_min,
-                                            max_val=Ap_max)
-        (Ad_min, Ad_max,
-         Ad_step, Ad) = self.clip_to_flanks(Ad, n_D_bins,
-                                            low_clip=Ad_prune_low,
-                                            high_clip=Ad_prune_high)
-
-        (Pp_min, Pp_max,
-         Pp_step, Pp) = self.clip_to_flanks(Pp, n_A_bins,
-                                            min_val=Pp_min,
-                                            max_val=Pp_max)
-        (Pd_min, Pd_max,
-         Pd_step, Pd) = self.clip_to_flanks(Pd, n_D_bins,
-                                            low_clip=Pd_prune_low,
-                                            high_clip=Pd_prune_high)
-
-        logging.info("  Discretizing the bin numbers")
-        Ap = self._flanking_digitize(Ap, Ap_min, Ap_step)
-        Ad = self._flanking_digitize(Ad, Ad_min, Ad_step)
-        Pp = self._flanking_digitize(Pp, Pp_min, Pp_step)
-        Pd = self._flanking_digitize(Pd, Pd_min, Pd_step)
-
+    def __universalize(Ap, Ad, Pp, Pd, n_A_bins, n_P_bins, n_D_bins):
         logging.info("  Constructing a sorted universal key/value int64")
         # <bin-A><bin-P><derivative-bin>
 
@@ -512,13 +488,14 @@ class Jazz(object):
         end = datetime.datetime.now().timestamp()
         logging.info(f"    Universalizing took: {int((end-start)*1000)}ms")
 
+        logging.info(f"  Sorting the universalized array")
         start = datetime.datetime.now().timestamp()
         univ_A.sort()
         univ_P.sort()
         end = datetime.datetime.now().timestamp()
         logging.info(f"    Sorting that took: {int((end-start)*1000)}ms")
 
-        logging.info("  Indexing")
+        logging.info("  Indexing sorted universalized array")
         start = datetime.datetime.now().timestamp()
         index = np.zeros((2, n_A_bins+2, n_P_bins+2, n_D_bins+2), dtype=np.int)
         for i in range(n_A_bins+2):
@@ -530,7 +507,10 @@ class Jazz(object):
         end = datetime.datetime.now().timestamp()
         logging.info(f"    Indexing took: {int((end-start)*1000)}ms")
 
-        logging.info("  Binning")
+        return index, univ_A, univ_P
+
+    def __bin_universalized_array(index, n_A_bins, n_P_bins, n_D_bins,):
+        logging.info("  Binning dA/dP")
         start = datetime.datetime.now().timestamp()
 
         moral_decay = np.zeros((2, n_A_bins, n_P_bins, n_D_bins),
@@ -552,33 +532,64 @@ class Jazz(object):
         end = datetime.datetime.now().timestamp()
         logging.info(f"    Binning took: {int((end-start)*1000)}ms")
 
-        if mesh_output:
-            Z = np.zeros((n_A_bins, n_P_bins), dtype=np.int)
-            for i in range(n_A_bins):
-                for j in range(n_P_bins):
-                    Z[i][j] = np.sum(moral_decay[0][i][j])
+    def plot_mesh():
+        Z = np.zeros((n_A_bins, n_P_bins), dtype=np.int)
+        for i in range(n_A_bins):
+            for j in range(n_P_bins):
+                Z[i][j] = np.sum(moral_decay[0][i][j])
 
-            fig = plt.figure(figsize=(12, 8))
-            ax = fig.add_subplot(1, 1, 1)
-            c = ax.pcolor(Z)
-            fig.colorbar(c, ax=ax)
-            fig.savefig(mesh_output)
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(1, 1, 1)
+        c = ax.pcolor(Z)
+        fig.colorbar(c, ax=ax)
+        fig.savefig(mesh_output)
 
-        bins_A = np.linspace(Ad_min, Ad_max, n_D_bins)
-        bins_P = np.linspace(Pd_min, Pd_max, n_D_bins)
+    def decay_rates(self, positions, derivatives, Ns,
+                    mesh_output=None):
+        """Bins the decay rate distributions.
 
-        # CDF
-        cdf = np.copy(moral_decay)
-        for i in range(n_A):
-            for j in range(n_P):
-                cdf[0][i][j] = np.cumsum(cdf[0][i][j])
-                cdf[1][i][j] = np.cumsum(cdf[1][i][j])
+        retval: [A'=0,P'=1][A-bin][P-bin][D-bin] = d(A/P)/dt
 
-        # Percentiles
-        pct = np.copy(cdf)
-        for i in range(n_A):
-            for j in range(n_P):
-                pct[0][i][j] = self._inverse(pct[0][i][j])
-                pct[1][i][j] = self._inverse(pct[1][i][j])
+        dt is defined in the call to derivatives() defaulting to 1 day.
 
-        return MoralDecay(moral_decay, cdf, pct, bins_A, bins_P, Ap, Ad, Pp, Pd)
+        positions: [frag-number][off][0] = time
+                   [frag-number][off][1] = apogee value
+                   [frag-number][off][2] = perigee value
+
+        derivatives: same as positions, but it's (d/dt)(A|P) and same time vals
+
+        Ns: [frag-number] = number of observations of that fragment
+        """
+
+        f = self.__concat_and_digitize
+
+        Ap_min = cfg.getint('min-apogee')
+        Ap_max = cfg.getint('max-apogee')
+        Ad_low = cfg.getfloat('apogee-deriv-low-prune')
+        Ad_high = cfg.getfloat('apogee-deriv-high-prune')
+        (Ap_min, Ap_max, Adp, Ap,
+         Ad_min, Ad_max, Add, Ad,) = f(positions, derivatives, Ns, 1,
+                                       min_val=Ap_min, max_val=Ap_max,
+                                       low_clip=Ad_low, high_clip=Ad_high)
+
+        Pp_min = cfg.getint('min-perigee')
+        Pp_max = cfg.getint('max-perigee')
+        Pd_low = cfg.getfloat('perigee-deriv-low-prune')
+        Pd_high = cfg.getfloat('perigee-deriv-high-prune')
+        (Pp_min, Pp_max, Pdp, Pp,
+         Pd_min, Pd_max, Pdd, Pd,) = f(positions, derivatives, Ns, 2,
+                                       min_val=Pp_min, max_val=Pp_max,
+                                       low_clip=Pd_low, high_clip=Pd_high)
+
+        logging.info(f"Quantifying Moral Decay")
+
+        __universalize(Ap, Ad, Pp, Pd, n_A_bins, n_P_bins, n_D_bins)
+
+        __bin_universalized_array(index, n_A_bins, n_P_bins, n_D_bins,)
+
+        # FIXME: Any normalization steps for things like B* compared
+        # to mean would happen at this stage.
+
+        if mesh_output: self.plot_mesh()
+
+        return MoralDecay(moral_decay, Ap, Ad, Pp, Pd)

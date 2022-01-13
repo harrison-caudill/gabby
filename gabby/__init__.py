@@ -5,6 +5,7 @@ from .gabby_plotter import GabbyPlotter
 from .bstar_plotter import BStarPlotter
 from .transformer import Jazz
 from .tle import TLE
+from .db import GabbyDB
 from .faker import FakeDB
 from .propagator import keplerian_period
 

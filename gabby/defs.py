@@ -64,13 +64,18 @@ DATE_FMT = '%Y-%m-%d %H:%M:%S'
 SECONDS_IN_DAY = 24*60*60.0
 
 
-def parse_date(timestr):
+def parse_date_ts(timestr):
     """Parses a time string and returns the internal integer timestamp.
     """
+    return dt_to_ts(parse_date_d(timestr))
+
+def parse_date_d(timestr):
+    """Parses a time string and returns the datetime.
+    """
+
     # repeated here to ensure explicit assignment of timezone
-    timestr += '-+0000'
     fmt = DATE_FMT + '-%z'
-    return dt_to_ts(datetime.datetime.strptime(timestr + '-+0000', fmt))
+    return datetime.datetime.strptime(timestr + '-+0000', fmt)
 
 def fmt_key(ts=None, des=None):
     """Formats a timestamp and designator into a key for the DB.

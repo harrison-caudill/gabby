@@ -119,6 +119,9 @@ class GabbyCache(object):
             os.unlink(path)
         os.rmdir(self._cache_path(name))
 
+    def __contains__(self, name):
+        return self.is_cached(name)
+
     def is_cached(self, name):
         """Determines whether or not the <name> is in the cache.
         """

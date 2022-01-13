@@ -47,7 +47,7 @@ Right now, it just builds fake DBs.
                         dest='cfg',
                         required=False,
                         type=str,
-                        default='cfg/test.cfg',
+                        default='test/test.cfg',
                         help='Path to the config file (%(default)s)')
 
     parser.add_argument('--target', '-t',
@@ -145,7 +145,23 @@ Right now, it just builds fake DBs.
                              output_dir=output_dir,
                              full_path=full_db_path,
                              frag_path=frag_db_path)
-        faker.build_norm()
+        faker.build_single()
+        jazz = gabby.Jazz(cfg,
+                          faker.full_env,
+                          faker.full_apt,
+                          faker.full_tle,
+                          faker.full_scope)
+        frags, apt, deriv, N = jazz.derivatives(priors=['99025A'],
+                                                fltr=jazz.lpf())
+        wat = jazz.decay_rates(apt, deriv, N,
+                               mesh_output='output/single-mesh.png')
+        # (moral_decay,
+        #  bins_A, bins_P,
+        #  Ap, Ad, Pp, Pd,) = 
+        # n_A = len(bins_A)
+        # n_P = len(bins_P)
+        # n_D = len(moral_decay[0][0][0])
+        
 
     else:
         logging.critical(f"WHAT DID YOU DO??? {args.cmd}")

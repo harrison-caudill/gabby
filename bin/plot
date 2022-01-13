@@ -79,23 +79,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=desc,
                                      formatter_class=formatter)
 
-    parser.add_argument('--full-db-path', '-u',
-                        metavar='FULL_DB_PATH',
+    parser.add_argument('--full-db-path', '-d',
+                        metavar='DB_PATH',
                         action='store',
-                        dest='full_db_path',
+                        dest='db_path',
                         required=False,
                         type=str,
                         default='output/tle.db',
                         help='Location of the full lmdb (%(default)s)')
-
-    parser.add_argument('--fragment-db-path', '-a',
-                        metavar='FRAGMENT_DB_PATH',
-                        action='store',
-                        dest='frag_db_path',
-                        required=False,
-                        type=str,
-                        default='output/fragments.db',
-                        help='Location of the fragments lmdb (%(default)s)')
 
     parser.add_argument('--config-file', '-c',
                         metavar='CONFIG_PATH',
@@ -121,7 +112,7 @@ if __name__ == '__main__':
                         dest='tgt',
                         required=False,
                         type=str,
-                        default='shakti',
+                        default='fen',
                         help='The ASAT to build video for (%(default)s)')
 
     parser.add_argument('--plot-type', '-T',
@@ -217,23 +208,23 @@ if __name__ == '__main__':
     plt.ioff()
     matplotlib.use('TkAgg')
 
-    full_db_path = args.full_db_path % arg_dict
-    frag_db_path = args.frag_db_path % arg_dict
+    db_path = args.db_path % arg_dict
+    db = gabby.GabbyDB(db_path)
 
     if args.plot_type == 'gabby':
         plotter = gabby.GabbyPlotter(cfg=cfg['general'],
                                      tgt=tgt,
+                                     cache_dir=args.cache_dir%arg_dict,
                                      output_dir=output_dir,
                                      img_dir=img_dir,
-                                     full_db_path=full_db_path,
-                                     frag_db_path=frag_db_path,
-                                     cache_dir=cache_dir)
+                                     db=db)
         plotter.plot(n_threads=args.n_threads)
 
     elif args.plot_type == 'bstar':
         plotter = gabby.BStarPlotter(cfg=cfg['general'],
                                      tgt=tgt,
                                      output_dir=output_dir,
+                                     cache_dir=args.cache_dir%arg_dict,
                                      img_dir=img_dir,
                                      full_db_path=full_db_path,
                                      frag_db_path=frag_db_path)

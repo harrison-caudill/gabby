@@ -81,6 +81,32 @@ class TestTransformer(object):
         correct = np.array([0, 0, 1, 2, 3, 4, 5, 6, 7, 7], dtype=np.int)
         assert(0 == len(np.trim_zeros(res - correct)))
 
-    def test_moral_decay(self, jazzercise):
-        # FIXME: Make sure negative values work properly
+    def test_derivative(self, jazzercise):
+        # FIXME
         pass
+
+    def test_moral_decay(self, jazzercise):
+
+        # Test the very basics
+        # This should result in a single filled bin for the derivative
+        # and 2 bins for A/P
+        fragments = ['99025A', '99025B']
+        N = 100
+        A0 = P0 = 500
+        pos = np.zeros((3, N), dtype=np.float32)
+        pos[0] = np.linspace(0, N-1, N, dtype=np.int) * gabby.SECONDS_IN_DAY
+        pos[1] = np.linspace(0, N-1, N) + A0
+        pos[2] = np.linspace(0, N-1, N) + P0
+
+        deriv = np.zeros((3, N-1), dtype=np.float32)
+        deriv[0] = pos[0][1:]
+        deriv[1] = np.diff(pos[1])
+        deriv[2] = np.diff(pos[2])
+
+        Ns = np.zeros(2) + N
+
+        moral_decay = jazzercise.decay_rates(pos, deriv, Ns)
+
+        print(moral_decay)
+
+        # FIXME: Make sure negative values work properly

@@ -37,7 +37,7 @@ if __name__ == '__main__':
                         dest='tgt',
                         required=False,
                         type=str,
-                        default='shakti',
+                        default='fen',
                         help='The ASAT to build video for (%(default)s)')
 
     parser.add_argument('--num-threads', '-n',
@@ -110,17 +110,15 @@ if __name__ == '__main__':
     tgt = cfg['gabby-'+args.tgt]
 
     # Aaaaaaannnnd ACTION!
-    start_d = datetime.datetime.strptime(tgt['start-date'],
-                                         cfg['general']['timestamp-fmt'])
-    end_d = datetime.datetime.strptime(tgt['end-date'],
-                                       cfg['general']['timestamp-fmt'])
+    start_d = gabby.parse_date_d(tgt['start-date'])
+    end_d = gabby.parse_date_d(tgt['end-date'])
     plot_period = tgt.getint('plot-period')
     dt = datetime.timedelta(days=plot_period)
     last_idx = int((end_d - start_d) / dt)
     n_digits = len(str(last_idx))
     video_path = os.path.abspath(os.path.join(output_dir,
                                               tgt['video-filename']))
-    img_path = os.path.abspath(os.path.join(output_dir, 'img'))
+    img_path = os.path.abspath(os.path.join(output_dir, 'gabby-img'))
 
     # f/s = (d/s) / (d/f)
     framerate = int(tgt.getint('days-per-sec') / plot_period)

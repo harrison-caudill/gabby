@@ -16,23 +16,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=desc,
                                      formatter_class=formatter)
 
-    parser.add_argument('--full-db-path', '-u',
-                        metavar='FULL_DB_PATH',
+    parser.add_argument('--db-path', '-d',
+                        metavar='DB_PATH',
                         action='store',
-                        dest='full_db_path',
+                        dest='db_path',
                         required=False,
                         type=str,
                         default='output/tle.db',
-                        help='Location of the full lmdb (%(default)s)')
-
-    parser.add_argument('--fragment-db-path', '-a',
-                        metavar='FRAGMENT_DB_PATH',
-                        action='store',
-                        dest='frag_db_path',
-                        required=False,
-                        type=str,
-                        default='output/fragments.db',
-                        help='Location of the fragments lmdb (%(default)s)')
+                        help='Location of the tle lmdb (%(default)s)')
 
     parser.add_argument('--force', '-f',
                         action='store_true',
@@ -113,14 +104,13 @@ if __name__ == '__main__':
     logging.info(f"Giddy up, Gabby!")
 
     # Go find the undertaker
-    full_db_path = args.full_db_path % arg_dict
-    frag_db_path = args.frag_db_path % arg_dict
-    under = gabby.Undertaker(full_db_path=full_db_path,
-                             frag_db_path=frag_db_path)
+    db_path = args.db_path % arg_dict
+    db = gabby.GabbyDB(db_path)
+    under = gabby.Undertaker(db=db)
     logging.info("The Undertaker is In")
 
     if args.index:
-        under.index_db()
+        under.build_scope()
 
     elif args.tle_path:
         if args.tle_path.endswith('json'):

@@ -33,7 +33,7 @@ def setup_logging(log_file='output/gab.log', log_level='info'):
     log_dir = os.path.dirname(log_file)
     if not len(log_dir): log_dir = '.'
     if not os.path.exists(log_dir):
-        chirp.mkdir_p(os.path.dirname(log_file))
+        mkdir_p(os.path.dirname(log_file))
     if not os.path.isdir(log_dir):
         msg = ("Specified logging directory is " +
                "not a directory: %s" % log_dir)
