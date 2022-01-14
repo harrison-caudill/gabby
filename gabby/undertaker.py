@@ -275,10 +275,10 @@ class Undertaker(object):
 
         # First key to initialize things:
         cursor.first()
-
-        cur_des = None
-        start_ts = None
-        last_ts = None
+        key, _ = cursor.item()
+        cur_des, first_ts, = key.decode().split(',')
+        cursor.next()
+        last_ts = first_ts = int(first_ts)
 
         for key, _ in cursor:
             des, ts, = key.decode().split(',')
@@ -287,11 +287,10 @@ class Undertaker(object):
             if des == cur_des: last_ts = ts
 
             else:
-                if cur_des:
-                    reg = pack_scope(start=first_ts, end=last_ts)
-                    txn.put(cur_des.encode(), reg,
-                            db=self.db.db_scope,
-                            overwrite=True)
+                reg = pack_scope(start=first_ts, end=last_ts)
+                txn.put(cur_des.encode(), reg,
+                        db=self.db.db_scope,
+                        overwrite=True)
                 cur_des = des
                 first_ts = ts
                 last_ts = ts
@@ -303,7 +302,7 @@ class Undertaker(object):
                 if 0 == (N % 1000):
                     logging.info(f"  Put {N} entries, latest: {des}")
 
-        if cur_des and start_ts is not None and end_ts is not None:
+        if cur_des and first_ts is not None and last_ts is not None:
             while txn.delete(cur_des.encode()): pass
             reg = pack_scope(start=first_ts, end=last_ts)
             txn.put(cur_des.encode(), reg,

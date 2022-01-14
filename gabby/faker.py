@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 
 import astropy.constants
+import json
 import lmdb
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 import random
 import tempfile
+
+import gabby
 
 from .defs import *
 from .utils import *
@@ -33,6 +36,10 @@ class FakeDB(object):
         self.cfg = cfg
         self.tgt = tgt
 
+    def build_scope(self):
+        u = gabby.Undertaker(self.db)
+        u.build_scope()
+
     def build_single(self):
         """Builds and stores the tAPT values for a single fragment.
 
@@ -53,34 +60,35 @@ class FakeDB(object):
           * single-decay-alt
         """
 
-        des = self.tgt['single-intldes']
-        A0 = self.tgt.getfloat('single-A')
-        P0 = self.tgt.getfloat('single-P')
-        t0_date = parse_date(self.tgt['single-start'])
+        des = json.loads(self.tgt['single-intldes'])
+        A0 = json.loads(self.tgt['single-A'])
+        P0 = json.loads(self.tgt['single-P'])
+        t0_date = gabby.parse_date_d(self.tgt['single-start'])
         t0 = dt_to_ts(t0_date)
-        L0 = self.tgt.getint('single-life')
+        L0 = json.loads(self.tgt['single-life'])
         h1 = self.tgt.getfloat('single-decay-alt')
-
 
         if 'single-output' in self.tgt:
             dirname = self.output_dir
-            fname = self.tgt['single-output'] % {'des':des}
+            fname = self.tgt['single-output'] % {'des':des[0]}
             if dirname: output = os.path.join(dirname, fname)
             else: output = fname
         else: output = None
 
-        logging.info(f"Building single satellite fragment:")
-        logging.info(f"  Designator: {des}")
-        logging.info(f"  Apogee:     {A0}")
-        logging.info(f"  Perigee:    {P0}")
-        logging.info(f"  Lifetime:   {L0}")
-        logging.info(f"  Decay Alt:  {h1}")
-        logging.info(f"  Start Date: {t0_date}")
+        L = len(A0)
+        for i in range(L):
+            logging.info(f"Building single satellite fragment:")
+            logging.info(f"  Designator: {des[i]}")
+            logging.info(f"  Apogee:     {A0}")
+            logging.info(f"  Perigee:    {P0}")
+            logging.info(f"  Lifetime:   {L0}")
+            logging.info(f"  Decay Alt:  {h1}")
+            logging.info(f"  Start Date: {t0_date}")
 
-        t, A, P, T = self._fake_sat(A0, P0, t0, L0,
-                                    decay_alt=h1,
-                                    output_path=output)
-        self._fill_apt(des, zip(t, A, P, T))
+            t, A, P, T = self._fake_sat(A0[i], P0[i], t0, L0[i],
+                                        decay_alt=h1,
+                                        output_path=output)
+            self._fill_apt(des[i], zip(t, A, P, T))
 
     def build_linear(self):
         """Builds and stores the tAPT values for a single linear-decay.
@@ -100,14 +108,13 @@ class FakeDB(object):
           * linear-decay-alt
         """
 
-        des = self.tgt['linear-intldes']
-        A0 = self.tgt.getfloat('lienar-A')
-        P0 = self.tgt.getfloat('linear-P')
-        t0_date = parse_date(self.tgt['linear-start'])
+        des = json.loads(self.tgt['linear-intldes'])
+        A0 = json.loads(self.tgt['linear-A'])
+        P0 = json.loads(self.tgt['linear-P'])
+        t0_date = gabby.parse_date_d(self.tgt['linear-start'])
         t0 = dt_to_ts(t0_date)
-        L0 = self.tgt.getint('linear-life')
+        L0 = json.loads(self.tgt['linear-life'])
         h1 = self.tgt.getfloat('linear-decay-alt')
-
 
         if 'linear-output' in self.tgt:
             dirname = self.output_dir
@@ -116,19 +123,21 @@ class FakeDB(object):
             else: output = fname
         else: output = None
 
-        logging.info(f"Building satellite fragment with linear decay:")
-        logging.info(f"  Designator: {des}")
-        logging.info(f"  Apogee:     {A0}")
-        logging.info(f"  Perigee:    {P0}")
-        logging.info(f"  Lifetime:   {L0}")
-        logging.info(f"  Decay Alt:  {h1}")
-        logging.info(f"  Start Date: {t0_date}")
+        L = len(A0)
+        for i in range(L):
+            logging.info(f"Building satellite fragment with linear decay:")
+            logging.info(f"  Designator: {des[i]}")
+            logging.info(f"  Apogee:     {A0[i]}")
+            logging.info(f"  Perigee:    {P0[i]}")
+            logging.info(f"  Lifetime:   {L0[i]}")
+            logging.info(f"  Decay Alt:  {h1}")
+            logging.info(f"  Start Date: {t0_date}")
 
-        t = np.linspace(0, L0, L0)
-        A = np.linspace(A0, h1, L0)
-        P = np.linspace(P0, h1, L0)
-        T = self._T(A, P)
-        self._fill_apt(des, zip(t, A, P, T))
+            t = np.linspace(0, (L0[i]-1)*24*3600, L0[i]) + t0
+            A = np.linspace(A0[i], h1, L0[i])
+            P = np.linspace(P0[i], h1, L0[i])
+            T = self._T(A, P)
+            self._fill_apt(des[i], zip(t, A, P, T))
 
     def build_norm(self):
         """Builds and stores a normal variate of fragments.
@@ -240,6 +249,7 @@ class FakeDB(object):
 
             key = fmt_key(des=frag, ts=ts)
             apt_bytes = pack_apt(A=A, P=P, T=T)
+
             txn.put(key, apt_bytes,
                     db=self.db.db_apt,
                     overwrite=True)

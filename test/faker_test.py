@@ -27,8 +27,6 @@ class TestFaker(object):
 
         faker._fill_apt(frag, zip(t, A, P, T))
 
-        for v in zip(t, A, P, T): print(v)
-
         # The loaded values should be sorted
         txn = faker.db.txn()
         wat = faker.db.load_apt([frag])

@@ -3,6 +3,7 @@
 import datetime
 import lmdb
 import numpy as np
+import os
 import pprint
 import pytest
 import sys
@@ -10,82 +11,69 @@ import sys
 import gabby
 from fixtures import *
 
-from gabby_plotter import GabbyDataModel
+sys.path.append(os.path.dirname(gabby.__file__))
+
+from gabby import GabbyDataModel
 
 class TestGabbyDataModel(object):
 
-    def test_basic_params(self, cfg, single_faker):
+    def test_basic_params(self, cfg, double_faker):
         """Checks the basic interface-required values (tAPT, N, ...)
         """
 
-        tgt = cfg['gabby-test-1']
+        tgt = cfg['gabby-test-2']
         model = GabbyDataModel(tgt)
 
         # Verify basic config file ingestion here
         utc = datetime.timezone.utc
         assert(model.start_d == datetime.datetime(2006, 12, 1, tzinfo=utc))
-        assert(model.end_d == datetime.datetime(2020, 10, 1, tzinfo=utc))
+        assert(model.end_d == datetime.datetime(2006, 12, 10, tzinfo=utc))
         assert(1 == model.dt.days)
         assert(0 == model.dt.seconds)
 
-        model.fetch_from_db(single_faker.db)
+        model.fetch_from_db(double_faker.db)
 
-        # Verify correct values from the db here
-        
-        assert(False)
+        assert(model.L == 2)
+        assert(model.N == 10)
 
-        self.L = None
-        self.N = None
-        self.names = None
+        assert(sorted(model.names) == ["99025A", "99025B"])
 
-        # Integer timestamps of each sample (can also be derived from
-        # the datetime and timedelta objects above).
-        self.ts = None
+        dt = datetime.timedelta(days=1).total_seconds()
+        ts = np.arange(gabby.dt_to_ts(model.start_d),
+                       gabby.dt_to_ts(model.end_d) + dt,
+                       dt)
 
-        # APT values for the fragments, 0's for invalid/unused
-        # numpy arrays of shape (N, L) and dtype np.float32
-        self.As = None
-        self.Ps = None
-        self.Ts = None
+        assert(np.all(ts == model.ts))
+
+        assert(model.ts.shape == (10,))
+        assert(model.As.shape == (10, 2))
+        assert(model.Ps.shape == (10, 2))
+        assert(model.Ts.shape == (10, 2))
+
+        assert(model.As[0][0] == 650)
+        assert(model.As[-1][0] == 100)
+        assert(model.As[0][1] == 600)
+        assert(model.As[4][1] == 100)
+
+        assert(model.Ps[0][0] == 400)
+        assert(model.Ps[-1][0] == 100)
+        assert(model.Ps[0][1] == 400)
+        assert(model.Ps[4][1] == 100)
 
         # Logical true/false for which samples are valid
         # numpy array of shape (N, L) and dtype np.int8
-        self.valid = None
+        valid = np.ones((10, 2), dtype=np.int8)
+        valid[5:,1] = np.zeros(5, dtype=np.int8)
+        assert(np.all(model.valid == valid))
 
-        # Number of fragments in scope at any given time sample.
-        # Derivable from valid with np.sum(valid, axis=1)
-        # numpy array of shape (N)
-        self.Ns = None
+        Ns = np.ones(10) + np.concatenate([np.ones(5), np.zeros(5)])
+        assert(np.all(model.Ns == Ns))
 
-
-    def test_fill_apt(self, single_faker):
-
-        faker = single_faker
-
-        L = 2
-        frag = '99025'
-        utc = datetime.timezone.utc
-        t = [gabby.dt_to_ts(datetime.datetime(1965, 11, 6, tzinfo=utc)),
-             gabby.dt_to_ts(datetime.datetime(1965, 11, 5, tzinfo=utc))]
-        A = [649, 650]
-        P = [399, 400]
-        T = [gabby.keplerian_period(A[i], P[i]) for i in range(L)]
-
-        faker._fill_apt(frag, zip(t, A, P, T))
-
-        for v in zip(t, A, P, T): print(v)
-
-        # The loaded values should be sorted
-        txn = faker.db.txn()
-        wat = faker.db.load_apt([frag])
-        tr, Ar, Pr, Tr, Nr = wat
-
-        A.sort(reverse=True)
-        P.sort(reverse=True)
-        T.sort(reverse=True)
-
-        for i in range(L):
-            assert(A[i] == Ar[0][i])
-            assert(P[i] == Pr[0][i])
-            assert(abs(T[i] -Tr[0][i]) < 1e-4)
-
+    def test_img_generation_human_review(self, cfg, double_faker):
+        p = gabby.GabbyPlotter(cfg=cfg,
+                               tgt=cfg['gabby-test-2'],
+                               img_dir='/Users/kungfoo/tmp',
+                               output_dir='/Users/kungfoo/tmp',
+                               cache_dir='/Users/kungfoo/tmp',
+                               db=double_faker.db)
+        p.plot()

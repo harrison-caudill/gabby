@@ -50,8 +50,6 @@ class GabbyDataModel(DataModel):
 
     def fetch_from_db(self, db):
         """Loads the data from the database.
-
-        
         """
 
         # First, find when pieces come into scope and when they go out
@@ -67,6 +65,7 @@ class GabbyDataModel(DataModel):
 
         # Initialize our main cursor
         cursor = txn.cursor(db=db.db_apt)
+        cursor.first()
 
         # Get our array dimensions
         L = self.L = len(fragments)
@@ -78,7 +77,7 @@ class GabbyDataModel(DataModel):
         start_ts = dt_to_ts(self.start_d)
         end_ts = dt_to_ts(self.end_d)
         dt_s = int(self.dt.total_seconds())
-        timestamps = np.arange(start_ts, end_ts+dt_s, dt_s)
+        timestamps = np.arange(start_ts, end_ts+dt_s, dt_s, dtype=np.int)
         assert(N == len(timestamps))
 
         # Before and after values for the timestamp and Apogee/Perigee
@@ -95,50 +94,77 @@ class GabbyDataModel(DataModel):
         before_T = np.zeros((N, L), dtype=np.float32)
         after_T = np.zeros((N, L), dtype=np.float32)
 
+        valid = np.zeros((N, L), dtype=np.int8)
+
         # The big main loop
+        j = 0
         for i in range(L):
             frag = fragments[i]
             logging.info(f"    Fetching data for {frag} ({i+1}/{L})")
 
-            # Loop through the observations
-            prefix = (frag+',').encode()
-            cursor.set_range(prefix)
+            # loop through the target timestamps
+            for j in range(N):
+                tgt_ts = timestamps[j]
 
-            # The starting value we linearly interpolate from
-            prev_v = None
-            prev_ts = 0
+                # Seek to the target
+                srch = fmt_key(des=frag, ts=tgt_ts)
+                cursor.set_range(srch)
 
-            # The next targeted timestamp
-            next_ts = start_ts
+                # This is the first on/or AFTER the target
+                k, v = cursor.item()
 
-            k, v, = cursor.item()
-            j = 0
-            while True:
-                if not k.startswith(prefix): break
-                ts = int(k[-12:])
-                if ts > end_ts: break
+                # If we don't have anything on/after the target, we're
+                # done
+                if not k: break
 
-                if ts < next_ts:
-                    prev_ts = ts
+                des, ts = parse_key(k)
+
+                # If we're beyond the end of the table, or the end of
+                # the fragment, we just continue
+                if des != frag: break
+
+                # We have our after value
+                next_ts = ts
+                next_v = v
+
+                if ts == tgt_ts:
+                    # If we are *exactly* at the target, we can assign
+                    # the prev val to 0 and exactly one step away.
+                    prev_ts = tgt_ts - dt_s
                     prev_v = v
-                    cursor.next()
-                    k, v, = cursor.item()
-                else:
-                    after_ts[j][i] = ts
-                    tgt_ts[j][i] = next_ts
-                    if prev_v:
-                        A, P, T = unpack_apt(prev_v)
-                        before_A[j][i] = A
-                        before_P[j][i] = P
-                        before_T[j][i] = T
-                        before_ts[j][i] = prev_ts
-                        A, P, T = unpack_apt(v)
-                        after_A[j][i] = A
-                        after_P[j][i] = P
-                        after_T[j][i] = T
 
-                    next_ts += dt_s
-                    j += 1
+                else:
+                    # We have an observation AFTER, but we need one
+                    # before to interpolate.
+
+                    # Move the cursor back for the before timestamp/value
+                    cursor.prev()
+                    k, v = cursor.item()
+                    if not k: break
+
+                    des, ts = parse_key(k)
+
+                    # If this check fails, then it means we had either 1
+                    # or 0 entries within the range.
+                    if not des or des != frag: break
+                    next_ts = ts
+                    next_v = v
+
+                # Register the values
+                A, P, T = unpack_apt(prev_v)
+                before_ts[j][i] = prev_ts
+                before_A[j][i] = A
+                before_P[j][i] = P
+                before_T[j][i] = T
+                A, P, T = unpack_apt(next_v)
+                after_ts[j][i] = next_ts
+                after_A[j][i] = A
+                after_P[j][i] = P
+                after_T[j][i] = T
+                valid[j][i] = 1
+
+                # We win
+                j += 1
 
         # We're done with our read-only transaction now
         txn.commit()
@@ -153,14 +179,6 @@ class GabbyDataModel(DataModel):
         A = before_A * off_before + after_A * off_after
         P = before_P * off_before + after_P * off_after
         T = before_T * off_before + after_T * off_after
-
-        logging.info(f"  Computing validity and data lengths")
-        valid = np.zeros((N, L), dtype=np.int8)
-        for i in range(L):
-            frag = fragments[i]
-            start = np.digitize(self.scope_start[frag], timestamps)
-            end = np.digitize(self.scope_end[frag], timestamps)
-            valid[start:end,i] = np.ones(end-start)
 
         Ns = np.sum(valid, axis=1, dtype=np.int64)
 
@@ -530,4 +548,4 @@ class GabbyPlotter(object):
         else:
             # One-time initialization per process
             self._plt_setup(ctx)
-            for idx in range(ctx.data.N): self._plot_impl(ctx, idx)
+            for idx in range(ctx.data.N): self._plot_gabby_frame(ctx, idx)

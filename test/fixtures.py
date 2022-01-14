@@ -28,6 +28,12 @@ def cfg():
 def single_faker(cfg):
     return gabby.FakeDB(cfg, cfg['db-single'])
 
+@pytest.fixture
+def double_faker(cfg):
+    retval = gabby.FakeDB(cfg, cfg['db-double'])
+    retval.build_linear()
+    retval.build_scope()
+    return retval
 
 @pytest.fixture
 def jazzercise():

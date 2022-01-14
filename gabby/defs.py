@@ -87,7 +87,7 @@ def parse_key(key):
     """
     if not isinstance(key, str): key = key.decode()
     des, ts, = key.split(',')
-    return (des, ts,)
+    return (des, int(ts),)
 
 def unpack_apt(val):
     """Unpacks a binary string for an apt-table entry.
