@@ -227,3 +227,154 @@ class GabbyDB(object):
         a, p, t, = unpack_apt(tmp)
         del cursor
         return (a, p, t,)
+
+    def lifetime_stats(self,
+                       cutoff,
+                       priors=None,
+                       n_apogee=5,
+                       n_perigee=5,
+                       n_time=5,
+                       weight_bins=True,
+                       min_life=1.0):
+        """Finds historical lifetime stats as a function of A/P.
+
+        Examines all previous debris fragments associated with
+        in-space collisions (ASAT and natural alike) and finds the
+        probability histogram associated with decay time as a function
+        of both apogee and perigee.  It stops at the cutoff date.
+
+        Returns: hist
+
+        n_apogee: number of apogee bins in the histogram
+        n_perigee: number of perigee bins in the histogram
+        n_time: number of time bins in the histogram
+        weight_bins: use uniformly-weighted bins for apogee and perigee
+        min_life: only consider fragments with a minimum lifetime (days)
+        """
+
+        if priors: prior_des = priors
+        else: prior_des = self._prior_des()
+
+        # Only need a read-only transaction for this
+        txn = lmdb.Transaction(self.db_env, write=False)
+        try:
+
+            start_reg = {}
+            end_reg = {}
+            a_reg = {}
+            p_reg = {}
+            t_reg = {}
+
+            cursor = txn.cursor(db=self.db_scope)
+
+            cutoff_ts = cutoff.timestamp()
+
+            # Load all the values into memory
+            for satellite in prior_des:
+                cursor.set_range(satellite.encode())
+                for k, v in cursor:
+                    frag = k.decode()
+                    if satellite not in frag: break
+
+                    start, end, = unpack_scope(v)
+
+                    # We only consider fully-decayed fragments
+                    if end > cutoff_ts: continue
+
+                    life = end - start
+
+                    # We ignore single-observation fragments
+                    if life < min_life*24*3600: continue
+
+                    start_reg[frag] = start
+                    end_reg[frag] = end
+
+                    apt_bytes = txn.get(fmt_key(start, frag), db=self.db_apt)
+                    a, p, t, = unpack_apt(apt_bytes)
+
+                    a_reg[frag] = a
+                    p_reg[frag] = p
+                    t_reg[frag] = life
+
+            # Relinquish our handle and clear our pointer
+            txn.commit()
+            txn = None
+
+            N = len(a_reg)
+            assert(len(start_reg) == len(end_reg) == len(p_reg) == len(t_reg))
+            logging.info(f"  Found {N} compliant fragments")
+
+            # Find our ranges
+            min_a = min([a_reg[k] for k in a_reg])
+            max_a = max([a_reg[k] for k in a_reg])
+            min_p = min([p_reg[k] for k in p_reg])
+            max_p = max([p_reg[k] for k in p_reg])
+            min_t = min([t_reg[k] for k in t_reg])
+            max_t = max([t_reg[k] for k in t_reg])
+
+            # Define our bins
+            if weight_bins:
+                A = sorted([a_reg[x] for x in a_reg])
+                P = sorted([p_reg[x] for x in p_reg])
+                T = sorted([t_reg[x] for x in t_reg])
+
+                a_bins = np.zeros(n_apogee)
+                p_bins = np.zeros(n_perigee)
+                t_bins = np.zeros(n_time)
+
+                a_idx = [int(x) for x in np.linspace(0, N, n_apogee+1)][:-1]
+                p_idx = [int(x) for x in np.linspace(0, N, n_perigee+1)][:-1]
+                t_idx = [int(x) for x in np.linspace(0, N, n_time+1)][:-1]
+
+                for i in range(n_apogee): a_bins[i] = A[a_idx[i]]
+                for i in range(n_perigee): p_bins[i] = P[p_idx[i]]
+                for i in range(n_time): t_bins[i] = T[t_idx[i]]
+
+            else:
+                a_bins = np.linspace(min_a, max_a, n_apogee)
+                p_bins = np.linspace(min_p, max_p, n_perigee)
+                t_bins = np.linspace(min_t, max_t, n_time)
+
+            logging.info(f"  Apogee:   {int(min_a)}-{int(max_a)}")
+            bins_s = str([int(x) for x in a_bins])
+            logging.info(f"  {bins_s}\n")
+            logging.info(f"  Perigee:  {int(min_p)}-{int(max_p)}")
+            bins_s = str([int(x) for x in p_bins])
+            logging.info(f"  {bins_s}\n")
+            logging.info(f"  Lifetime: {int(min_t)}-{int(max_t)}")
+            bins_s = str([datetime.datetime.utcfromtimestamp(x)
+                          for x in t_bins])
+
+            # Assign counts to the bins
+            decay_hist = np.zeros((n_apogee, n_perigee, n_time,))
+            for frag in a_reg:
+                a = a_reg[frag]
+                p = p_reg[frag]
+                t = t_reg[frag]
+
+                i = np.digitize(a, a_bins)-1
+                j = np.digitize(p, p_bins)-1
+                k = np.digitize(t, t_bins)-1
+
+                decay_hist[i][j][k] += 1
+
+            # Normalize the distribution
+            for i in range(n_apogee):
+                for j in range(n_perigee):
+                    s = sum(decay_hist[i][j])
+                    if not s: continue
+                    decay_hist[i][j] /= s
+
+            # for i in range(n_apogee):
+            #     a_start = a_bins[i]
+            #     logging.info(f"Decay Histogram (Apogee: {int(a_bins[i])})")
+            #     logging.info(f"  Total: {sum(decay_hist[i])}")
+            #     logging.info(f"  Total: {sum(sum(decay_hist[i]))}")
+            #     bin_s = pprint.pformat(decay_hist[i]).replace('\n', '\n  ')
+            #     logging.info(f"  {bin_s}")
+
+            return decay_hist
+
+        finally:
+            if txn: txn.commit()
+

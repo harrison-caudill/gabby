@@ -9,11 +9,15 @@ import pprint
 
 class GabbyCacheEntry(object):
 
-    def __init__(self, name, meta, mappings, is_dict):
+    def __init__(self, name, obj, keys):
+        """
+        name: cache entry name
+        obj: user-supplied object (sans numpy arrays)
+        keys: ordered list of keys of numpy objects we put into the cache
+        """
         self.name = name
-        self.meta = meta
-        self.mappings = mappings
-        self.is_dict = is_dict
+        self.obj = obj
+        self.keys = keys
 
 class GabbyCache(object):
     """On-disk caching system.
@@ -26,8 +30,8 @@ class GabbyCache(object):
     capabilities.
 
     The data will be stored as follows:
-    <cache-dir>/<name>/meta.pickle -- user-supplied metadata
-    <cache-dir>/<name>/data.np -- numpy arrays
+    <cache-dir>/<name>/ent.pickle -- object(sans numpy) and cache metadata
+    <cache-dir>/<name>/data.np -- numpy arrays found in that object
     """
 
     def __init__(self, path):
@@ -42,78 +46,80 @@ class GabbyCache(object):
         """
         return os.path.join(self.path, name)
 
-    def _meta_path(self, name):
-        return os.path.join(self._cache_path(name), 'metadata.pickle')
+    def _ent_path(self, name):
+        return os.path.join(self._cache_path(name), 'ent.pickle')
 
     def _data_path(self, name):
         return os.path.join(self._cache_path(name), 'data.np')
 
-    def put(self, name, metadata, data, overwrite=True):
-        """Adds the metadata and list of numpy arrays to the cache.
+    def __setitem__(self, name, obj):
+        return self.put(name, obj, overwrite=True)
+
+    def put(self, name, obj, overwrite=True):
+        """Adds the object to the cache.
 
         name: <str> the name to use when saving/referencing the data
-        metadata: <dict> whatever picklable metadata you want
-        data: Either an array or a dictionary of numpy arrays
+        obj:  whatever picklable object you want
         overwrite: <bool>
 
-        The <data> entry can be either a dictionary or a list so
-        that you can name them if you want.  We'll just use numbers as
-        the implied names of the arrays when saving to disk, then
-        reconstruct the array as needed during a cache get.
-
         Defaults to overwriting any old cache values, but you can
-        change that so it silently does nothing.
+        change that so it returns False and does nothing
         """
 
         if self.is_cached(name):
             if overwrite: self.clear_entry(name)
-            else: return
+            else: return False
 
         os.mkdir(self._cache_path(name))
 
-        is_dict = isinstance(data, dict)
 
-        if is_dict: mappings = sorted(data.keys())
-        else: mappings = list(range(len(data)))
-
-        ent = GabbyCacheEntry(name, metadata, mappings, is_dict)
-        with open(self._meta_path(name), 'wb') as fd: pickle.dump(ent, fd)
-
+        mappings = {}
+        attrs = vars(obj)
+        keys = []
         with open(self._data_path(name), 'wb') as fd:
-            for key in mappings: np.save(fd, data[key])
+            for k in attrs:
+                if isinstance(attrs[k], np.ndarray):
+                    keys.append(k)
+                    mappings[k] = getattr(obj, k)
+                    np.save(fd, mappings[k])
+                    setattr(obj, k, None)
+
+        for k in mappings: setattr(obj, k, mappings[k])
+
+        ent = GabbyCacheEntry(name, obj, keys)
+        with open(self._ent_path(name), 'wb') as fd: pickle.dump(ent, fd)
+
+        return True
+
+    def __getitem__(self, name):
+        return self.get(name)
 
     def get(self, name):
-        """Retreives the cached meta/data.
+        """Retreives the cached object.
 
-        Whether you passed in an array or a dictionary for the data,
-        it'll be reloaded in the same order.
-
-        returns meta, data
+        returns obj
         """
 
-        if not self.is_cached(name): return None, None
+        if not self.is_cached(name): return None
 
-        ent = self._load_cache_meta(name)
-        with open(self._meta_path(name), 'rb') as fd: ent = pickle.load(fd)
-
-        if ent.is_dict: data = {}
-        else: data = [None for i in range(len(ent.mappings))]
+        ent = self._load_cache_entry(name)
 
         with open(self._data_path(name), 'rb') as fd:
-            for key in ent.mappings: data[key] = np.load(fd)
+            for key in ent.keys:
+                setattr(ent.obj, key, np.load(fd))
 
-        return ent.meta, data
+        return ent.obj
 
-    def _load_cache_meta(self, name):
-        with open(self._meta_path(name), 'rb') as fd: return pickle.load(fd)
+    def _load_cache_entry(self, name):
+        with open(self._ent_path(name), 'rb') as fd: return pickle.load(fd)
 
     def clear_entry(self, name):
         """Deletes any cache entry for the name
         """
         if not self.is_cached(name): return
 
-        ent = self._load_cache_meta(name)
-        del_files = [self._meta_path(name), self._data_path(name)]
+        ent = self._load_cache_entry(name)
+        del_files = [self._ent_path(name), self._data_path(name)]
         for path in del_files:
             assert(os.path.isfile(path))
             os.unlink(path)

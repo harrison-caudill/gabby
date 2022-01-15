@@ -8,12 +8,10 @@ import pprint
 import pytest
 import sys
 
-import gabby
-from fixtures import *
-
-sys.path.append(os.path.dirname(gabby.__file__))
-
-from gabby import GabbyDataModel
+from .fixtures import *
+from ..utils import *
+from ..gabby_plotter import GabbyDataModel
+from ..gabby_plotter import GabbyPlotter
 
 class TestGabbyDataModel(object):
 
@@ -39,8 +37,8 @@ class TestGabbyDataModel(object):
         assert(sorted(model.names) == ["99025A", "99025B"])
 
         dt = datetime.timedelta(days=1).total_seconds()
-        ts = np.arange(gabby.dt_to_ts(model.start_d),
-                       gabby.dt_to_ts(model.end_d) + dt,
+        ts = np.arange(dt_to_ts(model.start_d),
+                       dt_to_ts(model.end_d) + dt,
                        dt)
 
         assert(np.all(ts == model.ts))
@@ -70,10 +68,15 @@ class TestGabbyDataModel(object):
         assert(np.all(model.Ns == Ns))
 
     def test_img_generation_human_review(self, cfg, double_faker):
-        p = gabby.GabbyPlotter(cfg=cfg,
-                               tgt=cfg['gabby-test-2'],
-                               img_dir='/Users/kungfoo/tmp',
-                               output_dir='/Users/kungfoo/tmp',
-                               cache_dir='/Users/kungfoo/tmp',
-                               db=double_faker.db)
-        p.plot()
+        tmpdir = '/Users/kungfoo/tmp'
+        p = GabbyPlotter(cfg=cfg,
+                         tgt=cfg['gabby-test-2'],
+                         img_dir=tmpdir,
+                         output_dir=tmpdir,
+                         cache_dir=tmpdir,
+                         db=double_faker.db)
+
+        # Uncomment for human inspection
+        # p.plot()
+
+        pass

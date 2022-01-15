@@ -50,16 +50,3 @@ class DataModel(object):
         # For the moment, this is just documentation, I might get
         # around to using the abc module at some point.
         assert(False)
-
-    def fetch_from_db(self, db, txn):
-        """Fetches data from the DB.
-
-        Any other data necessary for execution is assumed to have been
-        passed in during object initialization.  All data resulting
-        from this operation is assumed to be serializeable.  The db
-        and txn should NOT be stored in the object.
-        """
-
-        # For the moment, this is just documentation, I might get
-        # around to using the abc module at some point.
-        assert(False)

@@ -7,8 +7,9 @@ import pprint
 import pytest
 import sys
 
-import gabby
-from fixtures import *
+from .fixtures import *
+from ..utils import *
+from ..propagator import keplerian_period
 
 class TestFaker(object):
 
@@ -19,11 +20,11 @@ class TestFaker(object):
         L = 2
         frag = '99025'
         utc = datetime.timezone.utc
-        t = [gabby.dt_to_ts(datetime.datetime(1965, 11, 6, tzinfo=utc)),
-             gabby.dt_to_ts(datetime.datetime(1965, 11, 5, tzinfo=utc))]
+        t = [dt_to_ts(datetime.datetime(1965, 11, 6, tzinfo=utc)),
+             dt_to_ts(datetime.datetime(1965, 11, 5, tzinfo=utc))]
         A = [649, 650]
         P = [399, 400]
-        T = [gabby.keplerian_period(A[i], P[i]) for i in range(L)]
+        T = [keplerian_period(A[i], P[i]) for i in range(L)]
 
         faker._fill_apt(frag, zip(t, A, P, T))
 

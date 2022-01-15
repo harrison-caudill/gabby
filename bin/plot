@@ -97,10 +97,19 @@ if __name__ == '__main__':
                         default='cfg/asat.cfg',
                         help='Path to the config file (%(default)s)')
 
-    parser.add_argument('--cache-path', '-A',
-                        metavar='CACHE_DIR',
+    parser.add_argument('--tgt-cache-path',
+                        metavar='TGT_CACHE_DIR',
                         action='store',
-                        dest='cache_dir',
+                        dest='tgt_cache_dir',
+                        required=False,
+                        type=str,
+                        default='%(output_dir)s/%(tgt)s/cache',
+                        help='Cache directory (%(default)s)')
+
+    parser.add_argument('--global-cache-path',
+                        metavar='GLOBAL_CACHE_DIR',
+                        action='store',
+                        dest='global_cache_dir',
                         required=False,
                         type=str,
                         default='%(output_dir)s/cache',
@@ -112,7 +121,7 @@ if __name__ == '__main__':
                         dest='tgt',
                         required=False,
                         type=str,
-                        default='fen',
+                        default='shakti',
                         help='The ASAT to build video for (%(default)s)')
 
     parser.add_argument('--plot-type', '-T',
@@ -146,7 +155,7 @@ if __name__ == '__main__':
     parser.add_argument('--clean', '-C',
                         action='store_true',
                         dest='clean',
-                        help='Cleans the image directory before plotting',)
+                        help='Cleans the target directory before plotting',)
 
     parser.add_argument('--log-file', '-l',
                         metavar='LOG_FILE',
@@ -179,15 +188,15 @@ if __name__ == '__main__':
     # Get our output directory all set up
     output_dir = args.output_dir % arg_dict
     arg_dict['output_dir'] = output_dir
-    cache_dir = args.cache_dir % arg_dict
     img_dir = os.path.join(output_dir, args.plot_type+'-img')
-
+    global_cache_dir = args.global_cache_dir % arg_dict
+    tgt_cache_dir = args.tgt_cache_dir % arg_dict
     if args.clean:
         if os.path.isdir(img_dir): shutil.rmtree(img_dir)
-        if os.path.isdir(cache_dir): shutil.rmtree(cache_dir)
-
+        if os.path.isdir(tgt_cache_dir): shutil.rmtree(tgt_cache_dir)
     gabby.mkdir_p(output_dir)
-    gabby.mkdir_p(cache_dir)
+    gabby.mkdir_p(tgt_cache_dir)
+    gabby.mkdir_p(global_cache_dir)
 
     # Get set up to log
     log_file = args.log_file%arg_dict
@@ -208,27 +217,49 @@ if __name__ == '__main__':
     plt.ioff()
     matplotlib.use('TkAgg')
 
+    # Build the on-disk DB object
     db_path = args.db_path % arg_dict
     db = gabby.GabbyDB(db_path)
 
-    if args.plot_type == 'gabby':
-        plotter = gabby.GabbyPlotter(cfg=cfg['general'],
-                                     tgt=tgt,
-                                     cache_dir=args.cache_dir%arg_dict,
-                                     output_dir=output_dir,
-                                     img_dir=img_dir,
-                                     db=db)
-        plotter.plot(n_threads=args.n_threads)
+    # Spin up our global/target caches
+    global_cache = gabby.GabbyCache(global_cache_dir)
+    tgt_cache = gabby.GabbyCache(tgt_cache_dir)
 
-    elif args.plot_type == 'bstar':
-        plotter = gabby.BStarPlotter(cfg=cfg['general'],
-                                     tgt=tgt,
-                                     output_dir=output_dir,
-                                     cache_dir=args.cache_dir%arg_dict,
-                                     img_dir=img_dir,
-                                     full_db_path=full_db_path,
-                                     frag_db_path=frag_db_path)
-        plotter.plot(n_threads=args.n_threads)
+    if args.plot_type == 'gabby':
+
+        cache_name = gabby.GabbyDataModel.cache_name
+        data = tgt_cache[cache_name]
+        if data:
+            logging.info(f"  Found data in the local cache.")
+        else:
+            logging.info(f"  No joy in the cache. Building data model")
+            data = gabby.GabbyDataModel(tgt)
+            data.fetch_from_db(db)
+            tgt_cache[cache_name] = data
+
+    #     if fwd_prop:
+    #         prop = gabby.StatsPropagator(tgt=tgt,
+    #                                      tgt_cache_dir=tgt_cache_dir,
+    #                                      db=db)
+    #         stats = load_stats()
+            
+    #     plotter = gabby.GabbyPlotter(cfg=cfg['general'],
+    #                                  tgt=tgt,
+    #                                  cache_dir=args.cache_dir%arg_dict,
+    #                                  output_dir=output_dir,
+    #                                  img_dir=img_dir,
+    #                                  db=db)
+    #     plotter.plot(n_threads=args.n_threads)
+
+    # elif args.plot_type == 'bstar':
+    #     plotter = gabby.BStarPlotter(cfg=cfg['general'],
+    #                                  tgt=tgt,
+    #                                  output_dir=output_dir,
+    #                                  cache_dir=args.cache_dir%arg_dict,
+    #                                  img_dir=img_dir,
+    #                                  full_db_path=full_db_path,
+    #                                  frag_db_path=frag_db_path)
+    #     plotter.plot(n_threads=args.n_threads)
 
     else:
         logging.critical(f"WHAT DID YOU DO??? {args.plot_type}")

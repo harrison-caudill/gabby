@@ -30,8 +30,11 @@ class Propagator(object):
     pass
 
 
-class Moses(object):
-    """Forward propagator.
+class StatsPropagator(object):
+    """Forward propagator using basic statistical distribution.
+
+    Using historical data regarding decay rates as a function of
+    apogee and perigee,
     """
 
     def __init__(self, cfg, moral_decay, ):

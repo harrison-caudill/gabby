@@ -28,7 +28,9 @@ class GabbyDataModel(DataModel):
     """Raw data employed by the Gabby Plotter.
     """
 
-    def __init__(self, tgt):
+    cache_name = 'gabby_data_model'
+
+    def __init__(self, tgt, tgt_cache=None):
 
         self.tgt = tgt
 
@@ -46,7 +48,6 @@ class GabbyDataModel(DataModel):
 
         # Time step between images
         self.dt = datetime.timedelta(days=self.tgt.getint('plot-period'))
-
 
     def fetch_from_db(self, db):
         """Loads the data from the database.
@@ -101,6 +102,11 @@ class GabbyDataModel(DataModel):
         for i in range(L):
             frag = fragments[i]
             logging.info(f"    Fetching data for {frag} ({i+1}/{L})")
+            frag_b = frag.encode()
+            frag_len = len(frag)
+
+            prev_ts = None
+            prev_v = None
 
             # loop through the target timestamps
             for j in range(N):
@@ -115,15 +121,18 @@ class GabbyDataModel(DataModel):
 
                 # If we don't have anything on/after the target, we're
                 # done
-                if not k: break
+                if not k[:frag_len] == frag_b: break
+                #if not k: break
 
                 des, ts = parse_key(k)
 
                 # If we're beyond the end of the table, or the end of
                 # the fragment, we just continue
-                if des != frag: break
+                #if des != frag: break
 
-                # We have our after value
+                # Since the key is guaranteed to be on or after the
+                # search key, we can unconditionally assign the next
+                # value here.
                 next_ts = ts
                 next_v = v
 
@@ -140,31 +149,38 @@ class GabbyDataModel(DataModel):
                     # Move the cursor back for the before timestamp/value
                     cursor.prev()
                     k, v = cursor.item()
-                    if not k: break
+
+                    # If we don't have anything before the current
+                    # observation, then we'll just have to hope that
+                    # we can find a next->next value.
+                    if not k[:frag_len] == frag_b: continue
+                    #if not k: continue
 
                     des, ts = parse_key(k)
 
-                    # If this check fails, then it means we had either 1
-                    # or 0 entries within the range.
-                    if not des or des != frag: break
-                    next_ts = ts
-                    next_v = v
+                    # Same as above.
+                    #if des != frag: continue
 
-                # Register the values
-                A, P, T = unpack_apt(prev_v)
-                before_ts[j][i] = prev_ts
-                before_A[j][i] = A
-                before_P[j][i] = P
-                before_T[j][i] = T
-                A, P, T = unpack_apt(next_v)
-                after_ts[j][i] = next_ts
-                after_A[j][i] = A
-                after_P[j][i] = P
-                after_T[j][i] = T
-                valid[j][i] = 1
+                    # We win.  We found a previous entry.
+                    prev_ts = ts
+                    prev_v = v
 
-                # We win
-                j += 1
+                if prev_v:
+                    # Register the values
+                    A, P, T = unpack_apt(prev_v)
+                    before_ts[j][i] = prev_ts
+                    before_A[j][i] = A
+                    before_P[j][i] = P
+                    before_T[j][i] = T
+                    A, P, T = unpack_apt(next_v)
+                    after_ts[j][i] = next_ts
+                    after_A[j][i] = A
+                    after_P[j][i] = P
+                    after_T[j][i] = T
+                    valid[j][i] = 1
+
+                    # We win
+                    j += 1
 
         # We're done with our read-only transaction now
         txn.commit()
@@ -192,8 +208,8 @@ class GabbyDataModel(DataModel):
         self.As = A
         self.Ps = P
         self.Ts = T
-        self.valid = valid
         self.Ns = Ns
+        self.valid = valid
 
 
 class GabbyPlotContext(object):
@@ -323,12 +339,14 @@ class GabbyPlotter(object):
                  img_dir=None,
                  output_dir=None,
                  cache_dir=None,
+                 data=None,
                  db=None):
         self.cfg = cfg
         self.tgt = tgt
         self.img_dir = img_dir
         self.output_dir = output_dir
         self.cache_dir = cache_dir
+        self.data = data
         self.db = db
 
         self.cache = GabbyCache(cache_dir) if cache_dir else None
@@ -505,13 +523,9 @@ class GabbyPlotter(object):
             logging.info(f"  Loading context from cache")
             ctx, _ = self.cache.get('gabby_plot_ctx')
         else:
-            logging.info(f"  Building data model")
-            data = GabbyDataModel(self.tgt)
-            data.fetch_from_db(self.db)
-
             logging.info(f"  Building plot context")
             ctx = GabbyPlotContext(tgt=self.tgt,
-                                   data=data,
+                                   data=self.data,
                                    output_dir=self.output_dir)
 
             logging.info(f"  Loading data from DB")

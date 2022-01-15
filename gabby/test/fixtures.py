@@ -5,13 +5,15 @@ import os
 import pytest
 import tempfile
 
-import gabby.cache
+from ..cache import GabbyCache
+from ..faker import FakeDB
+from ..undertaker import Undertaker
 
 
 @pytest.fixture
 def cache():
     td = tempfile.TemporaryDirectory()
-    tmp = gabby.cache.GabbyCache(td.name)
+    tmp = GabbyCache(td.name)
     setattr(tmp, '__tmpdir', td)
     return tmp
 
@@ -26,19 +28,19 @@ def cfg():
 
 @pytest.fixture
 def single_faker(cfg):
-    return gabby.FakeDB(cfg, cfg['db-single'])
+    return FakeDB(cfg, cfg['db-single'])
 
 @pytest.fixture
 def double_faker(cfg):
-    retval = gabby.FakeDB(cfg, cfg['db-double'])
+    retval = FakeDB(cfg, cfg['db-double'])
     retval.build_linear()
     retval.build_scope()
     return retval
 
 @pytest.fixture
-def jazzercise():
-    return gabby.Jazz(None, None, None, None, None)
+def jazzercise(cfg):
+    return Jazz(cfg['stats-test-1'])
 
 @pytest.fixture
 def undertaker(single_faker):
-    return gabby.Undertaker(single_faker.db)
+    return Undertaker(single_faker.db)

@@ -6,15 +6,16 @@ import pprint
 import pytest
 import tempfile
 
-import gabby
-from fixtures import *
+from .fixtures import *
+from ..utils import *
+from ..tle import TLE
 
 
 class TestUndertaker(object):
 
     def test_calendar_offsets(undertaker):
 
-        offsets = gabby.Undertaker._build_calendar_offsets()
+        offsets = Undertaker._build_calendar_offsets()
 
         # Check leap years
         # https://www.thelists.org/list-of-leap-years.html
@@ -28,7 +29,7 @@ class TestUndertaker(object):
             if year in leap_years: continue
             assert(0 == offsets[year][365])
 
-        cur = gabby.EPOCH
+        cur = EPOCH
         dt = datetime.timedelta(days=1)
         end_date = datetime.datetime(2057, 1, 1, tzinfo=datetime.timezone.utc)
         while cur < end_date:
@@ -37,7 +38,7 @@ class TestUndertaker(object):
             year_off = cur.year % 100
             off = (cur - year_start)
             day_off = off.days
-            off = cur - gabby.EPOCH
+            off = cur - EPOCH
             assert(offsets[year_off][day_off] == off.total_seconds())
             cur += dt
 
@@ -66,21 +67,21 @@ class TestUndertaker(object):
         fd = open(tlefile.name, 'w')
         obs_time = datetime.datetime.now(tz=datetime.timezone.utc)
         for year in [2000, 1956, 1957, 1958, 1999]:
-            t = gabby.TLE(cat_number=cat_number,
-                          launch_year=year,
-                          launch_number=launch_number,
-                          epoch=obs_time,
-                          n=15,
-                          ndot=-1.0e-5,
-                          nddot=0.0,
-                          bstar=1e-5,
-                          tle_num=1,
-                          inc=51.6,
-                          raan=0.0,
-                          ecc=1.0e-6,
-                          argp=0.0,
-                          mean_anomaly=0.0,
-                          rev_num=1)
+            t = TLE(cat_number=cat_number,
+                    launch_year=year,
+                    launch_number=launch_number,
+                    epoch=obs_time,
+                    n=15,
+                    ndot=-1.0e-5,
+                    nddot=0.0,
+                    bstar=1e-5,
+                    tle_num=1,
+                    inc=51.6,
+                    raan=0.0,
+                    ecc=1.0e-6,
+                    argp=0.0,
+                    mean_anomaly=0.0,
+                    rev_num=1)
             cat_number += 1
             launch_number += 1
             test_tles.append(t)
