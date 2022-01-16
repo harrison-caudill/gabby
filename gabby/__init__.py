@@ -10,6 +10,8 @@ from .tle import TLE
 from .db import GabbyDB
 from .faker import FakeDB
 from .propagator import keplerian_period
+from .propagator import StatsPropagator
+from .db import CloudDescriptor
 
 from .defs import *
 

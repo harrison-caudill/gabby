@@ -80,7 +80,9 @@ def parse_date_d(timestr):
 def fmt_key(ts=None, des=None):
     """Formats a timestamp and designator into a key for the DB.
     """
-    return ("%s,%12.12d"%(des, ts)).encode()    
+    assert(len(des))
+    retval = ("%s,%12.12d"%(des, ts))
+    return retval.encode()
 
 def parse_key(key):
     """Deconstructs a DB key into the timestamp and designator.

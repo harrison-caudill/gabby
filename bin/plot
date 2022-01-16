@@ -121,7 +121,7 @@ if __name__ == '__main__':
                         dest='tgt',
                         required=False,
                         type=str,
-                        default='shakti',
+                        default='nudol',
                         help='The ASAT to build video for (%(default)s)')
 
     parser.add_argument('--plot-type', '-T',
@@ -149,7 +149,7 @@ if __name__ == '__main__':
                         dest='output_dir',
                         required=False,
                         type=str,
-                        default='output/%(tgt)s',
+                        default='output',
                         help='Output directory (%(default)s)',)
 
     parser.add_argument('--clean', '-C',
@@ -162,7 +162,7 @@ if __name__ == '__main__':
                         action='store',
                         dest='log_file',
                         type=str,
-                        default='%(output_dir)s/plot-%(tgt)s.log',
+                        default='%(output_dir)s/%(tgt)s/plot.log',
                         help='Logfile in output directory (%(default)s)')
 
     parser.add_argument('--log-level', '-L',
@@ -217,13 +217,13 @@ if __name__ == '__main__':
     plt.ioff()
     matplotlib.use('TkAgg')
 
-    # Build the on-disk DB object
-    db_path = args.db_path % arg_dict
-    db = gabby.GabbyDB(db_path)
-
     # Spin up our global/target caches
     global_cache = gabby.GabbyCache(global_cache_dir)
     tgt_cache = gabby.GabbyCache(tgt_cache_dir)
+
+    # Build the on-disk DB object
+    db_path = args.db_path % arg_dict
+    db = gabby.GabbyDB(db_path, global_cache=global_cache)
 
     if args.plot_type == 'gabby':
 
@@ -237,19 +237,21 @@ if __name__ == '__main__':
             data.fetch_from_db(db)
             tgt_cache[cache_name] = data
 
-    #     if fwd_prop:
-    #         prop = gabby.StatsPropagator(tgt=tgt,
-    #                                      tgt_cache_dir=tgt_cache_dir,
-    #                                      db=db)
-    #         stats = load_stats()
+        if tgt.getboolean('fwd-prop'):
+            logging.info(f"  Forward propagation requested")
+            prop = gabby.StatsPropagator(tgt=tgt,
+                                         cfg=cfg,
+                                         global_cache=global_cache,
+                                         db=db)
+            #stats = load_stats()
             
-    #     plotter = gabby.GabbyPlotter(cfg=cfg['general'],
-    #                                  tgt=tgt,
-    #                                  cache_dir=args.cache_dir%arg_dict,
-    #                                  output_dir=output_dir,
-    #                                  img_dir=img_dir,
-    #                                  db=db)
-    #     plotter.plot(n_threads=args.n_threads)
+        # plotter = gabby.GabbyPlotter(cfg=cfg['general'],
+        #                              tgt=tgt,
+        #                              cache_dir=args.cache_dir%arg_dict,
+        #                              output_dir=output_dir,
+        #                              img_dir=img_dir,
+        #                              db=db)
+        # plotter.plot(n_threads=args.n_threads)
 
     # elif args.plot_type == 'bstar':
     #     plotter = gabby.BStarPlotter(cfg=cfg['general'],

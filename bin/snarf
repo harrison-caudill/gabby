@@ -109,6 +109,16 @@ if __name__ == '__main__':
     under = gabby.Undertaker(db=db)
     logging.info("The Undertaker is In")
 
+    # txn = db.txn(write=False)
+    # cursor = txn.cursor(db=db.db_apt)
+    # cursor.set_range(','.encode())
+    # i = 0
+    # for k, v, in cursor:
+    #     i += 1
+    #     if not k.startswith(','.encode()): break
+    # print(i)
+    # sys.exit(0)
+
     if args.index:
         under.build_scope()
 

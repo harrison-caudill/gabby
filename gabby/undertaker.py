@@ -85,12 +85,16 @@ class Undertaker(object):
 
         with open(path, 'r') as fd: data = json.load(fd)
 
+        N = 0
+
         for datum in data['data']:
             des = datum['INTLDES']
-            ts = parse_date(datum['EPOCH'])
+            ts = parse_date_ts(datum['EPOCH'])
+
+            assert(len(des))
 
             ### INLINE-CODE
-            key = ("%s,%12.12d"%(des, ts)).encode()
+            key = fmt_key(ts=ts, des=des)
             apogee = float(datum['APOGEE'])
             perigee = float(datum['PERIGEE'])
             period = float(datum['PERIOD'])
@@ -118,6 +122,9 @@ class Undertaker(object):
             txn.put(key, tle_bytes,
                     db=self.db.db_tle,
                     overwrite=True)
+            N += 1
+        txn.commit()
+        logging.info(f"  Done.  Added {N} entries.")
 
     def load_tlefile(self, path, store_tles=False, base_des=None, force=False):
         """Loads the TLE file into the DB.
@@ -150,7 +157,6 @@ class Undertaker(object):
         txn = self.db.txn(write=True)
         N = 0
         skipped = 0
-        bad_fmt = 0
         start = datetime.datetime.now().timestamp()
         non_conforming = []
         with open(path) as fd:
@@ -171,6 +177,10 @@ class Undertaker(object):
 
                 # Find the designator
                 des = line_1[9:17].strip().replace(' ', '')
+                if not len(des):
+                    # TLE is non-conforming -- 2018
+                    non_conforming.append((line_1, line_2,))
+                    continue
 
                 # We're matching the on the base designator
                 if base_des and line_1[9:14] != base_des: continue
@@ -183,8 +193,6 @@ class Undertaker(object):
                 ts = int(offsets[year][day-1] + seconds)
 
                 key = fmt_key(des=des, ts=ts)
-                # INLINE-KEY
-                #("%s,%12.12d"%(des, ts)).encode()
 
                 # Increment the processed count now, since we may skip
                 # further action.
@@ -247,13 +255,11 @@ class Undertaker(object):
 
                     except Exception as e:
                         # some data quality issues here
-                        bad_fmt += 1
+                        non_conforming.append((line_1, line_2,))
                         continue
 
                 # Pack the bytes
                 apt_bytes = pack_apt(A=apogee, P=perigee, T=period)
-                ### INLINE-CODE
-                # apt_bytes = struct.pack(APT_STRUCT_FMT, apogee, perigee, period)
                 txn.put(key, apt_bytes,
                         db=self.db.db_apt,
                         overwrite=True)
@@ -308,5 +314,6 @@ class Undertaker(object):
             txn.put(cur_des.encode(), reg,
                     db=self.db.db_scope,
                     overwrite=True)
+        logging.info(f"  Completed {N} entries")
 
         txn.commit()

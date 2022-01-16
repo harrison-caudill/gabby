@@ -19,6 +19,7 @@ import scipy.signal
 
 from .defs import *
 from .utils import *
+from .db import CloudDescriptor
 
 """
 
@@ -80,14 +81,10 @@ class MoralDecay(object):
 
 class Jazz(object):
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, global_cache=None, tgt_cache=None):
         self.cfg = cfg
-
-    def _prior_des(self):
-        # Find the prior ASATs to use for producing the histograms
-        prior_des = self.cfg['historical-asats'].strip().split(',')
-        prior_des = [s.strip() for s in prior_des]
-        return prior_des
+        self.global_cache = global_cache
+        self.tgt_cache = tgt_cache
 
     def resample(self, X, Y, dx, sub='linear'):
         """Resamples the aperiodic signal to periodic sampling.
@@ -117,114 +114,114 @@ class Jazz(object):
         fltr /= np.sum(fltr)
         return fltr
 
-    # def derivatives(self,
-    #                 priors=None,
-    #                 dP=1,
-    #                 min_life=1.0,
-    #                 dt=SECONDS_IN_DAY,
-    #                 fltr=None,
-    #                 cache_dir=None):
-    #     """Finds A'(P), and P'(P)
-    #     """
+    def filtered_derivatives(self, apt,
+                             min_life=1.0,
+                             dt=SECONDS_IN_DAY,
+                             fltr=None):
+        """Finds A'(P), and P'(P) potentially filtering along the way.
 
-    #     start_time = datetime.datetime.now()
+        This will do a resample to match dt also.
+        """
 
-    #     # Only need a read-only transaction for this
-    #     txn = lmdb.Transaction(self.db_env, write=False)
+        start_time = datetime.datetime.now()
 
-    #     if priors: base_des = priors
-    #     else: base_des = self._prior_des()
-    #     fragments = find_daughter_fragments(base_des, txn, self.db_scope)
+        logging.info(f"Finding derivatives for {apt.L} fragments")
 
-    #     L = len(fragments)
+        # (f)iltered values
+        tf = []
+        Af = []
+        Pf = []
+        Tf = []
+        Nf = np.zeros(apt.L, dtype=np.int)
 
-    #     logging.info(f"Finding derivatives for {L} fragments")
+        # Resample and Filter
+        for i in range(apt.L):
+            # (r)esampled
+            Nr = apt.N[i]
+            tr, Ar = self.resample(apt.t[i][:Nr], apt.A[i][:Nr], dt)
+            tr, Pr = self.resample(apt.t[i][:Nr], apt.P[i][:Nr], dt)
+            tr, Tr = self.resample(apt.t[i][:Nr], apt.T[i][:Nr], dt)
+            Nr = len(tr)
 
-    #     # Load the APT values for all of the prior fragments
-    #     to, Ao, Po, To, No = load_apt(fragments, txn, self.db_apt,
-    #                                   cache_dir=cache_dir)
-    #     logging.info(f"  Finished loading APT values")
+            if fltr is not None and Nr > len(fltr):
+                tr = tr[len(fltr)//2:-1*(len(fltr)//2)]
+                Ar = np.convolve(Ar, fltr, mode='valid')
+                Pr = np.convolve(Pr, fltr, mode='valid')
+                Tr = np.convolve(Tr, fltr, mode='valid')
+                Nr = len(tr)
 
-    #     # (p)repared values
-    #     tp = []
-    #     Ap = []
-    #     Pp = []
-    #     Tp = []
-    #     Np = np.zeros(L, dtype=np.int)
+            tf.append(tr)
+            Af.append(Ar)
+            Pf.append(Pr)
+            Tf.append(Tr)
+            Nf[i] = Nr
 
-    #     for i in range(L):
+            # decrement the numpy refcount
+            tr = None
+            Ar = None
+            Pr = None
+            Tr = None
 
-    #         # (r)esampled
-    #         Nr = No[i]
-    #         tr, Ar = self.resample(to[i][:Nr], Ao[i][:Nr], dt)
-    #         tr, Pr = self.resample(to[i][:Nr], Po[i][:Nr], dt)
-    #         tr, Tr = self.resample(to[i][:Nr], To[i][:Nr], dt)
-    #         Nr = len(tr)
+            if i and 0 == i%1000:
+                logging.info("  Resampled and filtered {i} fragments")
 
-    #         if fltr is not None and Nr > len(fltr):
-    #             tr = tr[len(fltr)//2:-1*(len(fltr)//2)]
-    #             Ar = np.convolve(Ar, fltr, mode='valid')
-    #             Pr = np.convolve(Pr, fltr, mode='valid')
-    #             Tr = np.convolve(Tr, fltr, mode='valid')
-    #             Nr = len(tr)
+        M = max(Nf)
+        for i in range(apt.L):
+            tf[i].resize(M)
+            Af[i].resize(M)
+            Pf[i].resize(M)
+            Tf[i].resize(M)
 
-    #         tp.append(tr)
-    #         Ap.append(Ar)
-    #         Pp.append(Pr)
-    #         Tp.append(Tr)
-    #         Np[i] = Nr
+        tf = np.concatenate(tf).reshape((apt.L, M))
+        Af = np.concatenate(Af).reshape((apt.L, M))
+        Pf = np.concatenate(Pf).reshape((apt.L, M))
+        Tf = np.concatenate(Tf).reshape((apt.L, M))
+        Nf = Nf # It's fine as it is
 
-    #         if 0 == L%1000:
-    #             logging.info("  Resampled and filtered {i} fragments")
+        filtered = CloudDescriptor(fragments=apt.fragments,
+                                   t=tf, A=Af, P=Pf, T=Tf, N=Nf)
 
-    #     # Find the actual (d)erivatives and put all the filtered
-    #     # values into a single numpy array
-    #     N = np.where(Np > 0, Np-1, 0)
-    #     ret_filtered = np.zeros((L, 4, np.max(Np)-1), dtype=np.float32)
-    #     for i in range(L):
-    #         ret_filtered[i][0][:N[i]] = tp[i][1:]
-    #         ret_filtered[i][1][:N[i]] = Ap[i][1:]
-    #         ret_filtered[i][2][:N[i]] = Pp[i][1:]
-    #         ret_filtered[i][3][:N[i]] = Tp[i][1:]
-    #     ret_deriv = np.zeros((L, 4, np.max(Np)-1), dtype=np.float32)
-    #     for i in range(L):
-    #         ret_deriv[i][0][:N[i]] = tp[i][1:]
-    #         ret_deriv[i][1][:N[i]] = np.diff(Ap[i]) / dt
-    #         ret_deriv[i][2][:N[i]] = np.diff(Pp[i]) / dt
-    #         ret_deriv[i][3][:N[i]] = np.diff(Tp[i]) / dt
+        # (d)erivative values
+        td = tf[:,1:]
+        Ad = np.diff(Af) / dt
+        Pd = np.diff(Pf) / dt
+        Td = np.diff(Tf) / dt
+        Nd = np.clip(Nf[1:]-1, 0, None)
 
-    #     end_time = datetime.datetime.now()
+        deriv = CloudDescriptor(fragments=apt.fragments,
+                                t=td, A=Ad, P=Pd, T=Td, N=Nd)
 
-    #     elapsed = int((end_time-start_time).seconds * 10)/10.0
-    #     logging.info(f"  Finished finding derivatives in {elapsed} seconds")
+        end_time = datetime.datetime.now()
 
-    #     retval = (fragments, ret_filtered, ret_deriv, N)
-    #     return retval
+        elapsed = int((end_time-start_time).seconds * 10)/10.0
+        logging.info(f"  Finished finding derivatives in {elapsed} seconds")
 
-    # def __concatenate(self, arr, N, prekeys=None, postkeys=None):
-    #     """
-    #     +-         + +-   -+
-    #     |  1  2  3 | |  3  |
-    #     |  4  0  0 | |  1  | => [1 2 3 4 7 8]
-    #     |  7  8  0 | |  2  |
-    #     +-        -+ +-   -+
-    #     """
+        return filtered, deriv
 
-    #     print()
-    #     print('='*60)
-    #     pprint.pprint(N)
-    #     print(arr.shape)
-    #     print('='*60)
+    def __concatenate(self, arr, N, prekeys=None, postkeys=None):
+        """
+        +-         + +-   -+
+        |  1  2  3 | |  3  |
+        |  4  0  0 | |  1  | => [1 2 3 4 7 8]
+        |  7  8  0 | |  2  |
+        +-        -+ +-   -+
+        """
 
-    #     L = len(arr)
-    #     retval = np.zeros(np.sum(N), dtype=arr.dtype)
-    #     j = 0
-    #     for i in range(L):
-    #         tmp = arr[i]
-    #         for k in prekeys: tmp = tmp[k]
-    #         retval[j:j+N[i]] = tmp[:N[i]]
-    #         j += N[i]
-    #     return retval
+        print()
+        print('='*60)
+        pprint.pprint(N)
+        print(arr.shape)
+        print('='*60)
+
+        L = len(arr)
+        retval = np.zeros(np.sum(N), dtype=arr.dtype)
+        j = 0
+        for i in range(L):
+            tmp = arr[i]
+            for k in prekeys: tmp = tmp[k]
+            retval[j:j+N[i]] = tmp[:N[i]]
+            j += N[i]
+        return retval
 
     def _percentile_values(self, arr, low_frac, high_frac):
         """Finds the lower and upper bounds after pruning the fraction.

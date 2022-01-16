@@ -1,10 +1,56 @@
 #!/usr/bin/env python
 
+import hashlib
 import lmdb
 import logging
 import numpy as np
 
 from .defs import *
+
+
+class CloudDescriptor(object):
+    """Holds values associated with APT with a timestamp index.
+
+    There's a LOT of confusion that could happen WRT the
+    size/shape/meaning/organization of data, so I'm standardizing the
+    expression of tAPTN values into this wrapper object...it's also
+    fewer things that have to be passed around.
+
+    t=[[t0, t1, ..., tn, 0, ..., 0],
+       [t0, t1, ..., tn, 0, ..., 0],
+       ...
+       [t0, t1, ..., tn, 0, ..., 0]],
+    A=[[A0, A1, ..., An, 0, ..., 0],
+       [A0, A1, ..., An, 0, ..., 0],
+       ...
+       [A0, A1, ..., An, 0, ..., 0]],
+    P...
+    T...,
+    N = [N0, N1, ..., NL]
+
+    """
+
+    def __init__(self, fragments=None,
+                 t=None, A=None, P=None, T=None, N=None):
+        """Builds the descriptor.
+
+        t: np.ndarray(L, M) int
+        A/P/T: np.ndarray(L, M) float32
+        N: np.ndarray(L) int
+
+        L: Number of fragments
+        M: (usually) Power of 2 >= max(Nx)
+        """
+        self.fragments = fragments
+        self.t = t
+        self.A = A
+        self.P = P
+        self.T = T
+        self.N = N
+        self.M = t.shape[-1]
+        self.L = len(t)
+        assert(self.L == len(t) == len(A) == len(P) == len(T) == len(fragments))
+
 
 class GabbyDB(object):
     """Database interface for the Gabby data
@@ -13,13 +59,15 @@ class GabbyDB(object):
     data.
     """
 
-    def __init__(self, path=None):
+    def __init__(self, path=None, global_cache=None):
         """Does what every __init__ method does.
 
         path: path to the DB of satellites/fragments
         """
 
         self.path = path
+        self.global_cache = global_cache
+
         self.env = lmdb.Environment(path,
                                     max_dbs=N_DBS,
                                     map_size=DB_MAX_LEN)
@@ -36,19 +84,26 @@ class GabbyDB(object):
         This one is useful for finding daughter fragments after a
         collision.
         """
+
         retval = []
         commit, txn = self._txn(txn)
-        cursor = txn.cursor(db=db_scope)
+        cursor = txn.cursor(db=self.db_scope)
         for sat in base:
             prefix = sat.encode()
-            cursor.set_range(prefix)
+            srch = (sat+',').encode()
+            cursor.set_range(srch)
             for k, v in cursor:
                 if not k.startswith(prefix): break
                 retval.append(k.decode().split(',')[0])
         if commit: txn.commit()
         return retval
 
-    def load_apt(self, fragments, txn=None):
+    def _apt_cache_name(self, fragments):
+        m = hashlib.sha256()
+        m.update((','.join(sorted(fragments))).encode())
+        return 'apt-' + m.hexdigest()
+
+    def load_apt(self, fragments, txn=None, skip_cache=False):
         """Loads the APT values from the DB.
         
         Returns a tuple of np.arrays:
@@ -62,26 +117,23 @@ class GabbyDB(object):
         larger.  We dynamically expand the arrays as we go by powers
         of two, then just record the number of actual observations.
         
-        (t=[[t0, t1, ..., tn, 0, ..., 0],
-            [t0, t1, ..., tn, 0, ..., 0],
-            ...
-            [t0, t1, ..., tn, 0, ..., 0]],
-         A=[[A0, A1, ..., An, 0, ..., 0],
-            [A0, A1, ..., An, 0, ..., 0],
-            ...
-            [A0, A1, ..., An, 0, ..., 0]],
-         P...
-         T...,
-         N = [N0, N1, ..., NL])
         """
+
+        # numpy dimensions
+        N = 1024
+        L = len(fragments)
+
+        logging.info(f"Loading APT for {L} fragments")
+
+        if self.global_cache and not skip_cache:
+            name = self._apt_cache_name(fragments)
+            if name in self.global_cache:
+                logging.info("  Loading APT from cache")
+                return self.global_cache[name]
 
         # Initialize our main cursor
         commit, txn = self._txn(txn)
         cursor = txn.cursor(db=self.db_apt)
-
-        # numpy dimensions
-        L = len(fragments)
-        N = 1024
 
         # Keep track of the number of TLEs we find per fragment
         n_apt = np.zeros(L, dtype=np.int)
@@ -91,8 +143,6 @@ class GabbyDB(object):
         Ps = []
         Ts = []
         ts = []
-
-        logging.info(f"Loading APT for {L} fragments")
 
         for i in range(L):
             des = fragments[i]
@@ -142,12 +192,12 @@ class GabbyDB(object):
             # we have to clear these.  The arrays above will still hold a
             # reference.  If we didn't do this here, later calls to resize
             # would fail.
+            del t
             del A
             del P
             del T
-            del t
 
-            if 0 == i % 1000:
+            if i and 0 == i % 1000:
                 logging.info(f"  Finished loading {i} fragments")
 
         # Resize all of the arrays to the newly-found N and concatenate
@@ -158,14 +208,20 @@ class GabbyDB(object):
             Ts[i].resize(N)
 
         # Concatenate our final results
+        t = np.concatenate(ts).reshape((L, N))
         A = np.concatenate(As).reshape((L, N))
         P = np.concatenate(Ps).reshape((L, N))
         T = np.concatenate(Ts).reshape((L, N))
-        t = np.concatenate(ts).reshape((L, N))
-
-        retval = (t, A, P, T, n_apt)
 
         if commit: txn.commit()
+
+        retval = CloudDescriptor(fragments=fragments,
+                                 t=t, A=A, P=P, T=T, N=n_apt)
+
+        if self.global_cache and not skip_cache:
+            name = self._apt_cache_name(fragments)
+            logging.info("  Saving results to cache")
+            self.global_cache[name] = retval
 
         return retval
 
@@ -180,8 +236,6 @@ class GabbyDB(object):
         returns <do-commit>, txn
         """
         if txn: return False, txn
-        typ = "read/write" if write else "read only"
-        logging.info(f"  Building new {typ} transaction")
         return True, lmdb.Transaction(self.env, write=write)
 
     def load_scope(self, base, txn=None):
