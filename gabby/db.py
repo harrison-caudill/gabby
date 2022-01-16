@@ -3,6 +3,8 @@
 import hashlib
 import lmdb
 import logging
+import gc
+import matplotlib.pyplot as plt
 import numpy as np
 
 from .defs import *
@@ -50,6 +52,45 @@ class CloudDescriptor(object):
         self.M = t.shape[-1]
         self.L = len(t)
         assert(self.L == len(t) == len(A) == len(P) == len(T) == len(fragments))
+
+    def plot(self, path, idx, title=None):
+        fig = plt.figure(figsize=(12, 8))
+
+        if not title:
+            title = f"Descriptor index {idx}"
+        fig.suptitle(title, y=0.97, fontsize=25)
+
+        ax_AP = fig.add_subplot(1, 1, 1)
+
+        ax_AP.plot(self.t[idx][:self.N[idx]],
+                   self.A[idx][:self.N[idx]],
+                   label='A',
+                   color='firebrick')
+
+        ax_AP.plot(self.t[idx][:self.N[idx]],
+                   self.P[idx][:self.N[idx]],
+                   label='P',
+                   color='dodgerblue')
+
+        ax_AP.plot(self.t[idx][:self.N[idx]],
+                   (self.A[idx][:self.N[idx]] +
+                    self.P[idx][:self.N[idx]])/2,
+                   label='Mean',
+                   color='purple')
+
+        ax_AP.legend(loc=1)
+
+        ax_T = ax_AP.twinx()
+
+        ax_T.plot(self.t[idx][:self.N[idx]],
+                  self.T[idx][:self.N[idx]],
+                  label='T',
+                  color='black')
+
+        fig.savefig(path)
+        fig.clf()
+        plt.close(fig)
+        gc.collect()
 
 
 class GabbyDB(object):

@@ -141,29 +141,25 @@ class Jazz(object):
             tr, Ar = self.resample(apt.t[i][:Nr], apt.A[i][:Nr], dt)
             tr, Pr = self.resample(apt.t[i][:Nr], apt.P[i][:Nr], dt)
             tr, Tr = self.resample(apt.t[i][:Nr], apt.T[i][:Nr], dt)
-            Nr = len(tr)
+            Nr = tr.shape[0]
 
             if fltr is not None and Nr > len(fltr):
-                tr = tr[len(fltr)//2:-1*(len(fltr)//2)]
+                # Copy here so we don't have to deal with numpy references
+                tr = np.copy(tr[len(fltr)//2:-1*(len(fltr)//2)])
                 Ar = np.convolve(Ar, fltr, mode='valid')
                 Pr = np.convolve(Pr, fltr, mode='valid')
                 Tr = np.convolve(Tr, fltr, mode='valid')
-                Nr = len(tr)
+                Nr = tr.shape[0]
 
-            tf.append(tr)
-            Af.append(Ar)
-            Pf.append(Pr)
-            Tf.append(Tr)
-            Nf[i] = Nr
-
-            # decrement the numpy refcount
-            tr = None
-            Ar = None
-            Pr = None
-            Tr = None
+            # be sure to decrement the numpy refcount
+            tf.append(tr); tr = None
+            Af.append(Ar); Ar = None
+            Pf.append(Pr); Pr = None
+            Tf.append(Tr); Tr = None
+            Nf[i] = Nr; Nr = None
 
             if i and 0 == i%1000:
-                logging.info("  Resampled and filtered {i} fragments")
+                logging.info(f"  Resampled and filtered {i} fragments")
 
         M = max(Nf)
         for i in range(apt.L):
@@ -182,11 +178,11 @@ class Jazz(object):
                                    t=tf, A=Af, P=Pf, T=Tf, N=Nf)
 
         # (d)erivative values
-        td = tf[:,1:]
-        Ad = np.diff(Af) / dt
-        Pd = np.diff(Pf) / dt
-        Td = np.diff(Tf) / dt
-        Nd = np.clip(Nf[1:]-1, 0, None)
+        td = tf[:,1:] + (dt/2)
+        Ad = SECONDS_IN_DAY * np.diff(Af) / dt
+        Pd = SECONDS_IN_DAY * np.diff(Pf) / dt
+        Td = SECONDS_IN_DAY * np.diff(Tf) / dt
+        Nd = np.clip(Nf-1, 0, None)
 
         deriv = CloudDescriptor(fragments=apt.fragments,
                                 t=td, A=Ad, P=Pd, T=Td, N=Nd)
