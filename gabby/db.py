@@ -53,6 +53,18 @@ class CloudDescriptor(object):
         self.L = len(t)
         assert(self.L == len(t) == len(A) == len(P) == len(T) == len(fragments))
 
+    @property
+    def pruned_A(self): return self.prune(self.A)
+
+    @property
+    def pruned_P(self): return self.prune(self.P)
+
+    def prune(self, member):
+        retval = []
+        for i in range(self.L):
+            retval.append(member[i][:self.N[i]])
+        return retval
+
     def plot(self, path, idx, title=None):
         fig = plt.figure(figsize=(12, 8))
 
@@ -106,6 +118,8 @@ class GabbyDB(object):
         path: path to the DB of satellites/fragments
         """
 
+        logging.info(f"Loading DB at {path}")
+
         self.path = path
         self.global_cache = global_cache
 
@@ -131,7 +145,7 @@ class GabbyDB(object):
         cursor = txn.cursor(db=self.db_scope)
         for sat in base:
             prefix = sat.encode()
-            srch = (sat+',').encode()
+            srch = sat.encode()
             cursor.set_range(srch)
             for k, v in cursor:
                 if not k.startswith(prefix): break

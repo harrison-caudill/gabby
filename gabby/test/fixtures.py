@@ -8,6 +8,7 @@ import tempfile
 from ..cache import GabbyCache
 from ..faker import FakeDB
 from ..undertaker import Undertaker
+from ..transformer import Jazz
 
 
 @pytest.fixture
@@ -35,6 +36,12 @@ def double_faker(cfg):
     retval = FakeDB(cfg, cfg['db-double'])
     retval.build_linear()
     retval.build_scope()
+    return retval
+
+@pytest.fixture
+def linear_faker(cfg):
+    retval = FakeDB(cfg, cfg['db-single-linear'])
+    retval.build_linear()
     return retval
 
 @pytest.fixture

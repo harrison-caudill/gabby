@@ -117,13 +117,14 @@ class StatsPropagator(object):
             logging.info(f"  Found moral decay in the cache")
             decay = self.global_cache[decay_name]
         else:
-            logging.info(f"  Cache is free of moral decay, let's make some")
-            decay = jazz.decay_rates(apt, deriv)
-
+            logging.info(f"  Cache is free from moral decay, let's make some")
+            decay = jazz.decay_rates(apt, filtered, deriv)
+            # SENILE: re-enable
             logging.info(f"  Adding a little moral decay to the cache")
             self.global_cache[decay_name] = decay
 
-        sys.exit(0)
+        decay.plot_mesh('output/mesh.png')
+        decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
 
     def propagate(tgt, data):
         """Propagates the <data> forward according to <tgt>.

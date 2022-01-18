@@ -79,14 +79,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=desc,
                                      formatter_class=formatter)
 
-    parser.add_argument('--full-db-path', '-d',
+    parser.add_argument('--db-path', '-d',
                         metavar='DB_PATH',
                         action='store',
                         dest='db_path',
                         required=False,
                         type=str,
                         default='output/tle.db',
-                        help='Location of the full lmdb (%(default)s)')
+                        help='Location of the lmdb (%(default)s)')
 
     parser.add_argument('--config-file', '-c',
                         metavar='CONFIG_PATH',

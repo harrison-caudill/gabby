@@ -314,6 +314,7 @@ class Undertaker(object):
             txn.put(cur_des.encode(), reg,
                     db=self.db.db_scope,
                     overwrite=True)
+            N += 1
         logging.info(f"  Completed {N} entries")
 
         txn.commit()
