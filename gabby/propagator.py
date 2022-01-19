@@ -84,27 +84,6 @@ class StatsPropagator(object):
                     tgt_cache=self.tgt_cache)
 
         stats_cfg = self.cfg['stats']
-        base_frags = json.loads(stats_cfg['historical-asats'])
-        fragments = self.db.find_daughter_fragments(base_frags)
-        apt = self.db.load_apt(fragments)
-
-        filtered_name = self._filtered_cache_name(stats_cfg)
-        deriv_name = self._deriv_cache_name(stats_cfg)
-
-        if deriv_name in self.global_cache:
-            logging.info(f"  Found filtered/derivative values in global cache")
-            deriv = self.global_cache[deriv_name]
-            filtered = self.global_cache[filtered_name]
-        else:
-            logging.info(f"  Stats not found in cache -- building anew")
-
-            filtered, deriv = jazz.filtered_derivatives(apt,
-                                                        min_life=1.0,
-                                                        dt=SECONDS_IN_DAY,
-                                                        fltr=jazz.lpf())
-            logging.info(f"  Saving derivatives to cache")
-            self.global_cache[deriv_name] = deriv
-            self.global_cache[filtered_name] = filtered
 
         # Uncomment for debug plots
         # idx = 0
@@ -118,20 +97,46 @@ class StatsPropagator(object):
             decay = self.global_cache[decay_name]
         else:
             logging.info(f"  Cache is free from moral decay, let's make some")
+
+            base_frags = json.loads(stats_cfg['historical-asats'])
+            fragments = self.db.find_daughter_fragments(base_frags)
+            apt = self.db.load_apt(fragments)
+
+            filtered_name = self._filtered_cache_name(stats_cfg)
+            deriv_name = self._deriv_cache_name(stats_cfg)
+
+            if deriv_name in self.global_cache:
+                logging.info(f"  Found filtered/derivative values in global cache")
+                deriv = self.global_cache[deriv_name]
+                filtered = self.global_cache[filtered_name]
+            else:
+                logging.info(f"  Stats not found in cache -- building anew")
+                
+                filtered, deriv = jazz.filtered_derivatives(apt,
+                                                            min_life=1.0,
+                                                            dt=SECONDS_IN_DAY,
+                                                            fltr=jazz.lpf())
+                logging.info(f"  Saving derivatives to cache")
+                self.global_cache[deriv_name] = deriv
+                self.global_cache[filtered_name] = filtered
+
             decay = jazz.decay_rates(apt, filtered, deriv)
-            # SENILE: re-enable
+
             logging.info(f"  Adding a little moral decay to the cache")
             self.global_cache[decay_name] = decay
 
-        decay.plot_mesh('output/mesh.png')
-        decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
+        # decay.plot_mesh('output/mesh.png')
+        # decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
 
-    def propagate(tgt, data):
+    def propagate(self, data, n_days):
         """Propagates the <data> forward according to <tgt>.
 
         Global statistics necessary to perform the forward propagation
         are collected in the initialization phase.
         """
+
+        print(data)
+
         assert(False)
 
 

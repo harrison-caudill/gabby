@@ -279,42 +279,51 @@ class Undertaker(object):
         # Cursor to walk the DB
         cursor = txn.cursor(db=self.db.db_apt)
 
-        # First key to initialize things:
+        # We'll use this for searching
+        max_ts = int(1e12-1)
+
+        # Gotta start somewhere
         cursor.first()
         key, _ = cursor.item()
-        cur_des, first_ts, = key.decode().split(',')
-        cursor.next()
-        last_ts = first_ts = int(first_ts)
+        cur, first_ts = parse_key(key)
 
-        for key, _ in cursor:
-            des, ts, = key.decode().split(',')
-            ts = int(ts)
+        while True:
 
-            if des == cur_des: last_ts = ts
+            # Search for the last possible entry for this designator
+            srch = fmt_key(des=cur, ts=max_ts)
+            cursor.set_range(srch)
 
-            else:
-                reg = pack_scope(start=first_ts, end=last_ts)
-                txn.put(cur_des.encode(), reg,
-                        db=self.db.db_scope,
-                        overwrite=True)
-                cur_des = des
-                first_ts = ts
-                last_ts = ts
+            # The next item is either an entry which magically lines
+            # up with the very last possible value 31 thousand years
+            # in the future....orrrr it's the next designator
+            key, _ = cursor.item()
 
-                # Increment the processed count now, since we may skip
-                # further action.
-                N += 1
+            # We reached the end of the table
+            if not key: break
 
-                if 0 == (N % 1000):
-                    logging.info(f"  Put {N} entries, latest: {des}")
+            # Record the next designator/start
+            next_des, next_ts = parse_key(key)
 
-        if cur_des and first_ts is not None and last_ts is not None:
-            while txn.delete(cur_des.encode()): pass
+            # The entry immediately prior is the last entry of the
+            # current designator.
+            cursor.prev()
+            key, _ = cursor.item()
+            des, ts = parse_key(key)
+            assert(des == cur)
+            last_ts = ts
+
+            # We now have a designator, a first, and a last timestamp
             reg = pack_scope(start=first_ts, end=last_ts)
-            txn.put(cur_des.encode(), reg,
-                    db=self.db.db_scope,
-                    overwrite=True)
+            txn.put(cur.encode(), reg, db=self.db.db_scope, overwrite=True)
             N += 1
+
+            if 0 == (N % 1000):
+                logging.info(f"  Put {N} entries, latest: {des}")
+
+            # We already have the start of the next designator.
+            cur = next_des
+            first_ts = next_ts
+
         logging.info(f"  Completed {N} entries")
 
         txn.commit()

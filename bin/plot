@@ -243,8 +243,9 @@ if __name__ == '__main__':
                                          cfg=cfg,
                                          global_cache=global_cache,
                                          db=db)
-            #stats = load_stats()
-            
+            print(data.names)
+            #data = prop.propagate(data, 10)
+
         # plotter = gabby.GabbyPlotter(cfg=cfg['general'],
         #                              tgt=tgt,
         #                              cache_dir=args.cache_dir%arg_dict,

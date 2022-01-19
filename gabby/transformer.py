@@ -86,6 +86,9 @@ class MoralDecay(object):
         self.bins_A = np.linspace(Ad_min, Ad_max, self.n_D_bins)
         self.bins_P = np.linspace(Pd_min, Pd_max, self.n_D_bins)
 
+        self.cdf = self._cdf()
+        self.percentiles = self._percentiles()
+
     def plot_mesh(self, path):
         Z = np.zeros((self.n_A_bins, self.n_P_bins), dtype=np.int)
         for i in range(self.n_A_bins):
@@ -115,22 +118,31 @@ class MoralDecay(object):
             plt.close(fig)
             gc.collect()
 
-    def _cdf():
-        # CDF
-        cdf = np.copy(moral_decay)
-        for i in range(n_A):
-            for j in range(n_P):
+    def _cdf(self):
+        cdf = np.copy(self.decay_hist)
+        for i in range(self.n_A_bins):
+            for j in range(self.n_P_bins):
                 cdf[0][i][j] = np.cumsum(cdf[0][i][j])
                 cdf[1][i][j] = np.cumsum(cdf[1][i][j])
+        return cdf
 
-    def _percentiles():
-        # Percentiles
-        pct = np.copy(cdf)
-        for i in range(n_A):
-            for j in range(n_P):
-                pct[0][i][j] = self._inverse(pct[0][i][j])
-                pct[1][i][j] = self._inverse(pct[1][i][j])
-
+    def _percentiles(self):
+        pct = np.copy(self.cdf)
+        for i in range(2):
+            for An in range(self.n_A_bins):
+                for Pn in range(self.n_P_bins):
+                    last = 0
+                    for Dn in range(self.n_D_bins-1):
+                        srch = float(Dn)/self.n_D_bins
+                        assert(1 >= srch)
+                        assert(1+1e-3 >= self.cdf[i][An][Pn][Dn])
+                        val = np.searchsorted(self.cdf[i][An][Pn], srch)
+                        val = min(val, self.n_D_bins-1)
+                        assert(val >= last)
+                        last = val
+                        pct[i][An][Pn][Dn] = val
+                    pct[i][An][Pn][self.n_D_bins-1] = self.n_D_bins-1
+        return pct
 
 class Jazz(object):
 
