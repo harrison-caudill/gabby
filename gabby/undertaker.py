@@ -93,7 +93,6 @@ class Undertaker(object):
 
             assert(len(des))
 
-            ### INLINE-CODE
             key = fmt_key(ts=ts, des=des)
             apogee = float(datum['APOGEE'])
             perigee = float(datum['PERIGEE'])
@@ -245,11 +244,6 @@ class Undertaker(object):
                                              ecc=ecc, argp=argp,
                                              mean_anomaly=mean_anomaly,
                                              rev_num=rev_num)
-                        # ### INLINE-CODE
-                        # pack_vals = [n, ndot, nddot, bstar, tle_num, inc,
-                        #              raan, ecc, argp, mean_anomaly, rev_num]
-                        # tle_bytes = struct.pack(TLE_STRUCT_FMT, *pack_vals)
-
                         txn.put(key, tle_bytes, db=self.db.db_tle,
                                 overwrite=True)
 
