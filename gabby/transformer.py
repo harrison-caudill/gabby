@@ -86,8 +86,34 @@ class MoralDecay(object):
         self.bins_A = np.linspace(Ad_min, Ad_max, self.n_D_bins)
         self.bins_P = np.linspace(Pd_min, Pd_max, self.n_D_bins)
 
+        self.mean = self._mean()
         self.cdf = self._cdf()
         self.percentiles = self._percentiles()
+
+    def _mean(self):
+        retval = np.zeros((2, self.n_A_bins, self.n_P_bins), dtype=np.float32)
+        for i in range(self.n_A_bins):
+            for j in range(self.n_P_bins):
+                retval[0][i][j] = np.mean(self.decay_hist[0][i][j])
+                retval[1][i][j] = np.mean(self.decay_hist[1][i][j])
+        return retval
+
+    def index_array(self, data, axis='A'):
+        if 'A' == axis:
+            min_val = self.Ap_min
+            max_val = self.Ap_max
+            step = self.dAp
+        else:
+            min_val = self.Pp_min
+            max_val = self.Pp_max
+            step = self.dPp
+
+        retval = (data - min_val) / step
+
+        # make sure an int8 is sufficient
+        assert(1<<8 > (max_val-min_val)/step)
+
+        return retval.astype(np.int8)
 
     def plot_mesh(self, path):
         Z = np.zeros((self.n_A_bins, self.n_P_bins), dtype=np.int)
@@ -445,7 +471,7 @@ class Jazz(object):
         index: [0=dA/dt][A][P][dx/dt]
         The index holds the offsets into the universalized and sorted arrays.
         """
-        logging.info("  Binning dA/dP")
+        logging.info("  Binning dX/dP")
         start = datetime.datetime.now().timestamp()
 
         moral_decay = np.zeros((2, n_A_bins, n_P_bins, n_D_bins),

@@ -30,15 +30,14 @@ class TestFaker(object):
 
         # The loaded values should be sorted
         txn = faker.db.txn()
-        wat = faker.db.load_apt([frag])
-        tr, Ar, Pr, Tr, Nr = wat
+        des = faker.db.load_apt([frag])
 
         A.sort(reverse=True)
         P.sort(reverse=True)
         T.sort(reverse=True)
 
         for i in range(L):
-            assert(A[i] == Ar[0][i])
-            assert(P[i] == Pr[0][i])
-            assert(abs(T[i] -Tr[0][i]) < 1e-4)
+            assert(A[i] == des.A[0][i])
+            assert(P[i] == des.P[0][i])
+            assert(abs(T[i] - des.T[0][i]) < 1e-4)
 

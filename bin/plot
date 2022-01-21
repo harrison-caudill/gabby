@@ -228,9 +228,9 @@ if __name__ == '__main__':
     if args.plot_type == 'gabby':
 
         cache_name = gabby.GabbyDataModel.cache_name
-        data = tgt_cache[cache_name]
-        if data:
+        if cache_name in tgt_cache:
             logging.info(f"  Found data in the local cache.")
+            data = tgt_cache[cache_name]
         else:
             logging.info(f"  No joy in the cache. Building data model")
             data = gabby.GabbyDataModel(tgt)
@@ -239,20 +239,21 @@ if __name__ == '__main__':
 
         if tgt.getboolean('fwd-prop'):
             logging.info(f"  Forward propagation requested")
+
             prop = gabby.StatsPropagator(tgt=tgt,
                                          cfg=cfg,
                                          global_cache=global_cache,
                                          db=db)
-            print(data.names)
-            #data = prop.propagate(data, 10)
+            prop.propagate(data)
 
-        # plotter = gabby.GabbyPlotter(cfg=cfg['general'],
-        #                              tgt=tgt,
-        #                              cache_dir=args.cache_dir%arg_dict,
-        #                              output_dir=output_dir,
-        #                              img_dir=img_dir,
-        #                              db=db)
-        # plotter.plot(n_threads=args.n_threads)
+        plotter = gabby.GabbyPlotter(cfg=cfg['general'],
+                                     tgt=tgt,
+                                     cache_dir=tgt_cache_dir,
+                                     output_dir=output_dir,
+                                     data=data,
+                                     img_dir=img_dir,
+                                     db=db)
+        plotter.plot(n_threads=args.n_threads)
 
     # elif args.plot_type == 'bstar':
     #     plotter = gabby.BStarPlotter(cfg=cfg['general'],

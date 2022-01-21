@@ -20,14 +20,14 @@ class TestTransformer(object):
                         [4, 0, 0],
                         [7, 8, 0],],
                        dtype=np.float32)
-        res = jazzercise._Jazz__concatenate(tmp, N)
+        res = jazzercise._concatenate(tmp, N)
         assert(0 == len(np.trim_zeros(res - correct)))
 
         tmp = np.array([[1, 2, 3],
                         [4, 0, 0],
                         [7, 8, 0]],
                        dtype=np.float32)
-        res = jazzercise._Jazz__concatenate(tmp, N)
+        res = jazzercise._concatenate(tmp, N)
         assert(0 == len(np.trim_zeros(res - correct)))
 
     def test_percentile(self, jazzercise):

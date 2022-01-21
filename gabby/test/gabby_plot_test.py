@@ -68,6 +68,7 @@ class TestGabbyDataModel(object):
         assert(np.all(model.Ns == Ns))
 
     def test_img_generation_human_review(self, cfg, double_faker):
+
         tmpdir = '/Users/kungfoo/tmp'
         p = GabbyPlotter(cfg=cfg,
                          tgt=cfg['gabby-test-2'],

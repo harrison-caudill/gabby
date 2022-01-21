@@ -143,13 +143,15 @@ class GabbyDB(object):
         retval = []
         commit, txn = self._txn(txn)
         cursor = txn.cursor(db=self.db_scope)
+        cursor.first()
+
         for sat in base:
-            prefix = sat.encode()
-            srch = sat.encode()
+            prefix = srch = sat.encode()
             cursor.set_range(srch)
             for k, v in cursor:
                 if not k.startswith(prefix): break
-                retval.append(k.decode().split(',')[0])
+                retval.append(k.decode())
+
         if commit: txn.commit()
         return retval
 
@@ -175,7 +177,7 @@ class GabbyDB(object):
         """
 
         # numpy dimensions
-        N = 1024
+        N = 32
         L = len(fragments)
 
         logging.info(f"Loading APT for {L} fragments")
@@ -322,19 +324,12 @@ class GabbyDB(object):
     def get_latest_apt(self, txn, des):
         """Returns the latest APT for the given designator
         """
-        cursor = txn.cursor(db=self.db_scope)
-
-        cursor.set_range(des.encode())
-        key, scope = cursor.item()
+        scope = txn.get(des.encode(), db=self.db_scope)
         start, end = unpack_scope(scope)
 
         key = fmt_key(end, des)
         tmp = txn.get(key, db=self.db_apt)
-        if not tmp:
-            key = fmt_key(start, des)
-            tmp = txn.get(key, db=self.db_apt)
         a, p, t, = unpack_apt(tmp)
-        del cursor
         return (a, p, t,)
 
     def lifetime_stats(self,
@@ -473,14 +468,6 @@ class GabbyDB(object):
                     s = sum(decay_hist[i][j])
                     if not s: continue
                     decay_hist[i][j] /= s
-
-            # for i in range(n_apogee):
-            #     a_start = a_bins[i]
-            #     logging.info(f"Decay Histogram (Apogee: {int(a_bins[i])})")
-            #     logging.info(f"  Total: {sum(decay_hist[i])}")
-            #     logging.info(f"  Total: {sum(sum(decay_hist[i]))}")
-            #     bin_s = pprint.pformat(decay_hist[i]).replace('\n', '\n  ')
-            #     logging.info(f"  {bin_s}")
 
             return decay_hist
 

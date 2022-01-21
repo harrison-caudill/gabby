@@ -37,7 +37,7 @@ if __name__ == '__main__':
                         dest='tgt',
                         required=False,
                         type=str,
-                        default='fen',
+                        default='nudol',
                         help='The ASAT to build video for (%(default)s)')
 
     parser.add_argument('--num-threads', '-n',

@@ -94,13 +94,13 @@ class StatsPropagator(object):
         decay_name = self._decay_cache_name(stats_cfg)
         if decay_name in self.global_cache:
             logging.info(f"  Found moral decay in the cache")
-            decay = self.global_cache[decay_name]
+            decay = self.decay = self.global_cache[decay_name]
         else:
             logging.info(f"  Cache is free from moral decay, let's make some")
 
             base_frags = json.loads(stats_cfg['historical-asats'])
             fragments = self.db.find_daughter_fragments(base_frags)
-            apt = self.db.load_apt(fragments)
+            self.apt = apt = self.db.load_apt(fragments)
 
             filtered_name = self._filtered_cache_name(stats_cfg)
             deriv_name = self._deriv_cache_name(stats_cfg)
@@ -120,7 +120,7 @@ class StatsPropagator(object):
                 self.global_cache[deriv_name] = deriv
                 self.global_cache[filtered_name] = filtered
 
-            decay = jazz.decay_rates(apt, filtered, deriv)
+            self.decay = decay = jazz.decay_rates(apt, filtered, deriv)
 
             logging.info(f"  Adding a little moral decay to the cache")
             self.global_cache[decay_name] = decay
@@ -128,17 +128,29 @@ class StatsPropagator(object):
         # decay.plot_mesh('output/mesh.png')
         # decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
 
-    def propagate(self, data, n_days):
+    def propagate(self, data, fwd=True, rev=True):
         """Propagates the <data> forward according to <tgt>.
 
         Global statistics necessary to perform the forward propagation
         are collected in the initialization phase.
         """
 
-        print(data)
+        L = data.L
+        N = data.N
 
-        assert(False)
+        index_A = self.decay.index_array(data.As)
+        index_P = self.decay.index_array(data.Ps)
 
+        dt = data.dt.total_seconds()
+
+        for i in range(N-1):
+            for j in range(L):
+                A = data.As[i][j]
+                P = data.Ps[i][j]
+                if A and not data.As[i+1][j]:
+                    # predict the next value
+                    data.As[i+1][j] = dt * self.decay.mean[0][index_A[i][j]][index_P[i][j]]
+                    data.Ps[i+1][j] = dt * self.decay.mean[1][index_A[i][j]][index_P[i][j]]
 
 def keplerian_period(A, P):
     """Determines the period of a keplerian ellipitical earth orbit.

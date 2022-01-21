@@ -99,9 +99,9 @@ class TestUndertaker(object):
         for i in range(len(test_tles)):
             t = test_tles[i]
             A, P, T = __APT(t.n, t.eccentricity)
-            assert(abs(A - taptn[1][i][0]) < 1)
-            assert(abs(P - taptn[2][i][0]) < 1)
-            assert(abs(T - taptn[3][i][0]) < 1)
+            assert(abs(A - taptn.A[i][0]) < 1)
+            assert(abs(P - taptn.P[i][0]) < 1)
+            assert(abs(T - taptn.T[i][0]) < 1)
 
         # base_des: None, [A], [A, B]
         # force: true/false

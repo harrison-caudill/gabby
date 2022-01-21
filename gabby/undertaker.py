@@ -99,6 +99,7 @@ class Undertaker(object):
             period = float(datum['PERIOD'])
             apt_bytes = pack_apt(A=apogee, P=perigee, T=period)
 
+            print(key)
             txn.put(key, apt_bytes,
                     db=self.db.db_apt,
                     overwrite=True)
@@ -292,11 +293,13 @@ class Undertaker(object):
             # in the future....orrrr it's the next designator
             key, _ = cursor.item()
 
-            # We reached the end of the table
-            if not key: break
-
-            # Record the next designator/start
-            next_des, next_ts = parse_key(key)
+            if key:
+                # Record the next designator/start
+                next_des, next_ts = parse_key(key)
+            else:
+                # We reached the end of the table
+                next_des = None
+                next_ts = None
 
             # The entry immediately prior is the last entry of the
             # current designator.
@@ -317,6 +320,9 @@ class Undertaker(object):
             # We already have the start of the next designator.
             cur = next_des
             first_ts = next_ts
+
+            # We're at the end of the table
+            if not next_des: break
 
         logging.info(f"  Completed {N} entries")
 
