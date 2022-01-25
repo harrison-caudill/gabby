@@ -59,6 +59,9 @@ class GabbyDataModel(DataModel):
         # The results will be sorted in this order
         fragments = sorted(list(self.scope_start.keys()))
         fragments = [f for f in fragments if f not in self.mask]
+
+        # SENILE
+        fragments = fragments[:10]
         self.names = fragments
 
         apt = self.apt = db.load_apt(fragments)
@@ -75,8 +78,8 @@ class GabbyDataModel(DataModel):
         logging.info(f"  Shape of data: {N}, {L}")
 
         # Get the integer timestamps to use for indexing
-        start_ts = dt_to_ts(self.start_d)
-        end_ts = dt_to_ts(self.end_d)
+        self.start_ts = start_ts = dt_to_ts(self.start_d)
+        self.end_ts = end_ts = dt_to_ts(self.end_d)
         dt_s = int(self.dt.total_seconds())
         timestamps = np.arange(start_ts, end_ts+dt_s, dt_s, dtype=np.int)
         assert(N == len(timestamps))
@@ -355,7 +358,7 @@ class GabbyPlotContext(object):
     the logic for the data.
     """
 
-    def __init__(self, tgt, data, output_dir):
+    def __init__(self, tgt, data, output_dir, img_dir=None):
         """
         tgt: configparser results for the plot section
         data: FragmentData
@@ -373,7 +376,8 @@ class GabbyPlotContext(object):
 
         # We're going to store the images in a separate directory for
         # cleanliness
-        self.img_dir = os.path.join(self.output_dir, 'gabby-img')
+        if not img_dir: img_dir = os.path.join(self.output_dir, 'gabby-img')
+        self.img_dir = img_dir
 
         # The colors are meant to be interpreted directly by matplotlib
         self.apogee_color = self.tgt['apogee-color']
@@ -654,10 +658,11 @@ class GabbyPlotter(object):
 
         if 'gabby_plot_ctx' in self.cache:
             logging.info(f"  Loading context from cache")
-            ctx, _ = self.cache.get('gabby_plot_ctx')
+            ctx = self.cache['gabby_plot_ctx']
         else:
             logging.info(f"  Building plot context")
             ctx = GabbyPlotContext(tgt=self.tgt,
+                                   img_dir=self.img_dir,
                                    data=self.data,
                                    output_dir=self.output_dir)
 

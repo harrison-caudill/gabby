@@ -32,16 +32,16 @@ def setup_logging(log_file='output/gab.log', log_level='info'):
     # file.
     log_dir = os.path.dirname(log_file)
     if not len(log_dir): log_dir = '.'
-    if not os.path.exists(log_dir):
-        mkdir_p(os.path.dirname(log_file))
+    if not os.path.exists(log_dir): mkdir_p(os.path.dirname(log_file))
+
     if not os.path.isdir(log_dir):
         msg = ("Specified logging directory is " +
                "not a directory: %s" % log_dir)
         logging.critical(msg)
         raise ConfigurationException(msg)
+
     try:
         fd = open(log_file, 'w')
-        fd.close()
     except:
         msg = "Failed to open log file for writing: %s" % log_file
         logging.critical(msg)
@@ -57,11 +57,20 @@ def setup_logging(log_file='output/gab.log', log_level='info'):
         raise ConfigurationException(msg)
     log_level = log_level.upper()
 
-    # Set up the logging facility
-    logging.basicConfig(level=log_level, filename=log_file, filemode='w')
+    # Add the log file
     ch = logging.StreamHandler()
     ch.setLevel(log_level)
+    ch.setStream(fd)
     logging.getLogger().addHandler(ch)
+
+    logging.getLogger().setLevel(log_level)
+
+    # Add stdout
+    ch = logging.StreamHandler()
+    ch.setLevel(log_level)
+    ch.setStream(sys.stdout)
+    logging.getLogger().addHandler(ch)
+
 
 def time_command(f, msg):
     def retval(*args, **kwargs):

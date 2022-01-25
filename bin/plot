@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import configparser
@@ -188,7 +188,7 @@ if __name__ == '__main__':
     # Get our output directory all set up
     output_dir = args.output_dir % arg_dict
     arg_dict['output_dir'] = output_dir
-    img_dir = os.path.join(output_dir, args.plot_type+'-img')
+    img_dir = os.path.join(output_dir, args.tgt, args.plot_type+'-img')
     global_cache_dir = args.global_cache_dir % arg_dict
     tgt_cache_dir = args.tgt_cache_dir % arg_dict
     if args.clean:
@@ -249,9 +249,9 @@ if __name__ == '__main__':
         plotter = gabby.GabbyPlotter(cfg=cfg['general'],
                                      tgt=tgt,
                                      cache_dir=tgt_cache_dir,
+                                     img_dir=img_dir,
                                      output_dir=output_dir,
                                      data=data,
-                                     img_dir=img_dir,
                                      db=db)
         plotter.plot(n_threads=args.n_threads)
 

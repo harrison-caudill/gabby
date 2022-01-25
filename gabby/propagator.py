@@ -85,12 +85,6 @@ class StatsPropagator(object):
 
         stats_cfg = self.cfg['stats']
 
-        # Uncomment for debug plots
-        # idx = 0
-        # apt.plot('output/apt.png', idx, title='apt')
-        # filtered.plot('output/filtered.png', idx, title='filtered')
-        # deriv.plot('output/deriv.png', idx, title='derivative')
-
         decay_name = self._decay_cache_name(stats_cfg)
         if decay_name in self.global_cache:
             logging.info(f"  Found moral decay in the cache")
@@ -120,13 +114,19 @@ class StatsPropagator(object):
                 self.global_cache[deriv_name] = deriv
                 self.global_cache[filtered_name] = filtered
 
+            # Uncomment for debug plots
+            idx = 1
+            apt.plot('output/apt.png', idx, title=f"positions {deriv.fragments[idx]}")
+            filtered.plot('output/filtered.png', idx, title=f"filtered {deriv.fragments[idx]}")
+            deriv.plot('output/deriv.png', idx, title=f"derivative {deriv.fragments[idx]}")
+
             self.decay = decay = jazz.decay_rates(apt, filtered, deriv)
 
             logging.info(f"  Adding a little moral decay to the cache")
             self.global_cache[decay_name] = decay
 
-        # decay.plot_mesh('output/mesh.png')
-        # decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
+        decay.plot_mesh('output/mesh.png')
+        #decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
 
     def propagate(self, data, fwd=True, rev=True):
         """Propagates the <data> forward according to <tgt>.
@@ -138,10 +138,7 @@ class StatsPropagator(object):
         L = data.L
         N = data.N
 
-        index_A = self.decay.index_array(data.As)
-        index_P = self.decay.index_array(data.Ps)
-
-        dt = data.dt.total_seconds()
+        dt = data.dt.total_seconds()/24/3600.0
 
         for i in range(N-1):
             for j in range(L):
@@ -149,8 +146,27 @@ class StatsPropagator(object):
                 P = data.Ps[i][j]
                 if A and not data.As[i+1][j]:
                     # predict the next value
-                    data.As[i+1][j] = dt * self.decay.mean[0][index_A[i][j]][index_P[i][j]]
-                    data.Ps[i+1][j] = dt * self.decay.mean[1][index_A[i][j]][index_P[i][j]]
+                    assert(dt)
+                    idx_A = int((A - self.decay.Ap_min) / self.decay.dAp)
+                    idx_P = int((P - self.decay.Pp_min) / self.decay.dPp)
+                    rate_A = self.decay.mean[0][idx_A][idx_P]
+                    assert(rate_A)
+                    rate_P = self.decay.mean[1][idx_A][idx_P]
+                    delta_A = dt * rate_A
+                    delta_P = dt * rate_P
+                    data.As[i+1][j] = A + delta_A
+                    data.Ps[i+1][j] = P + delta_P
+                    data.Ts[i+1][j] = keplerian_period(data.As[i+1][j], data.Ps[i+1][j])
+                    data.valid[i+1][j] = 1
+                    assert(data.As[i+1][j])
+                    assert(data.As[i+1][j] != A)
+                    # print(i, j)
+                    # print(P, delta_A)
+                    # print()
+
+        # Update the scope table so we actually plot things
+        for frag in data.names:
+            data.scope_end[frag] = data.end_ts
 
 def keplerian_period(A, P):
     """Determines the period of a keplerian ellipitical earth orbit.

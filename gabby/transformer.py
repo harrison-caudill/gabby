@@ -94,8 +94,30 @@ class MoralDecay(object):
         retval = np.zeros((2, self.n_A_bins, self.n_P_bins), dtype=np.float32)
         for i in range(self.n_A_bins):
             for j in range(self.n_P_bins):
-                retval[0][i][j] = np.mean(self.decay_hist[0][i][j])
-                retval[1][i][j] = np.mean(self.decay_hist[1][i][j])
+                retval[0][i][j] = np.sum(self.bins_A*self.decay_hist[0][i][j])
+                retval[1][i][j] = np.sum(self.bins_P*self.decay_hist[1][i][j])
+
+        # # Mean the means to fill in the 0's
+        # for i in range(self.n_A_bins):
+        #     for j in range(self.n_P_bins):
+        #         for k in range(2):
+        #             inputs = [retval[k][i][j]]
+
+        #             if 0 < j:inputs.append(retval[k][i][j-1])
+        #             inputs.append(retval[k][i][j])
+        #             if self.n_P_bins-1>j: inputs.append(retval[k][i][j+1])
+
+        #             if 0 < i:
+        #                 if 0 < j: inputs.append(retval[k][i-1][j-1])
+        #                 inputs.append(retval[k][i-1][j])
+        #                 if self.n_P_bins-1>j:inputs.append(retval[k][i-1][j+1])
+
+        #             if self.n_A_bins-1 < i:
+        #                 if 0 < j: inputs.append(retval[k][i+1][j-1])
+        #                 inputs.append(retval[k][i+1][j])
+        #                 if self.n_P_bins-1>j:inputs.append(retval[k][i+1][j+1])
+        #             retval[k][i][j] = np.mean(inputs)
+
         return retval
 
     def index_array(self, data, axis='A'):
@@ -103,6 +125,9 @@ class MoralDecay(object):
             min_val = self.Ap_min
             max_val = self.Ap_max
             step = self.dAp
+            logging.info(f"Indexing Array")
+            logging.info(f"  range: {min_val} => {max_val}")
+            pprint.pprint(data)
         else:
             min_val = self.Pp_min
             max_val = self.Pp_max
@@ -116,16 +141,12 @@ class MoralDecay(object):
         return retval.astype(np.int8)
 
     def plot_mesh(self, path):
-        Z = np.zeros((self.n_A_bins, self.n_P_bins), dtype=np.int)
-        for i in range(self.n_A_bins):
-            for j in range(self.n_P_bins):
-                cur = np.sum(self.decay_hist[1][i][j])
-                Z[i][j] = cur
-
-        Z = np.where(Z > 0, 1, 0)
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(1, 1, 1)
-        c = ax.pcolor(Z)
+        ax.set_xlabel('Apogee Bin')
+        ax.set_ylabel('Perigee Bin')
+        fig.suptitle('dA/dt (km/day)')
+        c = ax.pcolor(self.mean[0])
         fig.colorbar(c, ax=ax)
         fig.savefig(path)
 
@@ -495,6 +516,87 @@ class Jazz(object):
 
         return moral_decay
 
+    def _slow_decay_rates(self, apt, resampled, deriv):
+        """Very slowly and tediously bin the data.
+
+        This is largely here to aid unit testing.
+        """
+
+        sec = self.cfg['stats']
+
+        n_A_bins = sec.getint('n-apogee-bins')
+        Ap = self._concatenate(resampled.A, resampled.N)
+        Ap_min = sec.getint('min-apogee')
+        Ap_max = sec.getint('max-apogee')
+        Ap_bins = np.linspace(Ap_min, Ap_max, n_A_bins)
+
+        n_P_bins = sec.getint('n-perigee-bins')
+        Pp = self._concatenate(resampled.P, resampled.N)
+        Pp_min = sec.getint('min-perigee')
+        Pp_max = sec.getint('max-perigee')
+        Pp_bins = np.linspace(Pp_min, Pp_max, n_P_bins)
+
+        n_D_bins = sec.getint('n-deriv-bins')
+
+        Ad = self._concatenate(deriv.A, resampled.N)
+        low_clip = sec.getfloat('apogee-deriv-low-prune')
+        high_clip = sec.getfloat('apogee-deriv-high-prune')
+        Ad_min, Ad_max, = self._percentile_values(Ad, low_clip, high_clip)
+        Ad_bins = np.linspace(Ad_min, Ad_max, n_D_bins)
+
+        Pd = self._concatenate(deriv.P, resampled.N)
+        low_clip = sec.getfloat('perigee-deriv-low-prune')
+        high_clip = sec.getfloat('perigee-deriv-high-prune')
+        Pd_min, Pd_max, = self._percentile_values(Pd, low_clip, high_clip)
+        Pd_bins = np.linspace(Pd_min, Pd_max, n_D_bins)
+
+        data = [[Ad, Ad_bins],
+                [Pd, Pd_bins]]
+
+        # Numpy's digitize will take the Ap_max value and place it
+        # beyond the final bin.  So what we do is to move anything
+        # above our max value to be below the min.  That way, when we
+        # run the digitize, all the values that are too high end up
+        # being in the 0'th (discarded) bin.  Then we can clip the
+        # value on the high end to be the final bin which should only
+        # show up when the value is exactly the maximum.
+        Ap_clipped = np.where(Ap>Ap_max, Ap_min-1, Ap)
+        Ap_step = (Ap_max-Ap_min)/n_A_bins
+        tmp_bins = np.concatenate(([Ap_min-Ap_step/2], Ap_bins))
+        Ap_binned = np.digitize(Ap_clipped, tmp_bins, right=True)
+        Ap_binned = np.clip(Ap_binned, 0, n_A_bins) - 1
+
+        Ad_clipped = np.where(Ad>Ad_max, Ad_min-1, Ad)
+        Ad_step = (Ad_max-Ad_min)/n_D_bins
+        tmp_bins = np.concatenate(([Ad_min-Ad_step/2], Ad_bins))
+        Ad_binned = np.digitize(Ad_clipped, tmp_bins, right=True)
+
+        Pp_clipped = np.where(Pp>Pp_max, Pp_min-1, Pp)
+        Pp_step = (Pp_max-Pp_min)/n_P_bins
+        tmp_bins = np.concatenate(([Pp_min-Pp_step/2], Pp_bins))
+        Pp_binned = np.digitize(Pp_clipped, tmp_bins, right=True)
+
+        Pd_clipped = np.where(Pd>Pd_max, Pd_min-1, Pd)
+        Pd_step = (Pd_max-Pd_min)/n_D_bins
+        tmp_bins = np.concatenate(([Pd_min-Pd_step/2], Pd_bins))
+        Pd_binned = np.digitize(Pd_clipped, tmp_bins, right=True)
+
+        retval = np.zeros((2, n_A_bins+1, n_P_bins+1, n_D_bins+1),
+                          dtype=np.float32)
+
+        logging.info(f"Binning: {len(Ap_binned)}")
+        for i in range(len(Ap_binned)):
+            retval[0][Ap_binned[i]][Pp_binned[i]][Ad_binned[i]] += 1
+            retval[1][Ap_binned[i]][Pp_binned[i]][Pd_binned[i]] += 1
+            if not i % 1000 and i:
+                logging.info(f"  Binned: {i//1000}k")
+
+        return (Ap_min, Ap_max, Ap_step, Ap,
+                Ad_min, Ad_max, Ad_step, Ad,
+                Pp_min, Pp_max, Pp_step, Pp,
+                Pd_min, Pd_max, Pd_step, Pd,
+                retval[:,1:,1:,1:])
+
     def decay_rates(self, apt, resampled, deriv):
         """Bins the decay rate distributions.
 
@@ -547,6 +649,17 @@ class Jazz(object):
                                                      n_A_bins,
                                                      n_P_bins,
                                                      n_D_bins,)
+        
+        # logging.info(f"Slowly Quantifying Moral Decay")
+        # start = datetime.datetime.now().timestamp()
+
+        # (Ap_min, Ap_max, dAp, Ap,
+        #  Ad_min, Ad_max, dAd, Ad,
+        #  Pp_min, Pp_max, dPp, Pp,
+        #  Pd_min, Pd_max, dPd, Pd,
+        #  moral_decay) = self._slow_decay_rates(apt, resampled, deriv)
+        # end = datetime.datetime.now().timestamp()
+        # logging.info(f"    Slow Version took: {int((end-start)*1000)}ms")
 
         # FIXME: Any normalization steps for things like B* compared
         # to mean would happen at this stage.

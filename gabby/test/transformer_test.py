@@ -107,7 +107,6 @@ class TestTransformer(object):
         assert((1, 4) == deriv.A.shape == deriv.P.shape)
         assert((1, 4) == filtered.A.shape == filtered.P.shape)
         assert(np.all(filtered.t == deriv.t))
-        
 
     def test_moral_decay(self, cfg, linear_faker):
 
