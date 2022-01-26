@@ -54,6 +54,9 @@ class MoralDecay(object):
     decay_hist:
       [A=0,P=1][A-bin][P-bin][D-bin]
 
+      resampled, derivatives: <CloudDescriptor>
+      Their N's should match
+
       Derivative bins are from D_min-D_max for the specific
       combination of A/P A and
     """
@@ -83,44 +86,40 @@ class MoralDecay(object):
         self.n_A_bins = len(decay_hist[0])
         self.n_P_bins = len(decay_hist[0][0])
         self.n_D_bins = len(decay_hist[0][0][0])
-        self.bins_A = np.linspace(Ad_min, Ad_max, self.n_D_bins)
-        self.bins_P = np.linspace(Pd_min, Pd_max, self.n_D_bins)
+
+
+        self.bins_Ap = np.linspace(Ap_min, Ap_max, self.n_A_bins)
+        self.bins_Pp = np.linspace(Pp_min, Pp_max, self.n_P_bins)
+        self.bins_Ad = np.linspace(Ad_min, Ad_max, self.n_D_bins)
+        self.bins_Pd = np.linspace(Pd_min, Pd_max, self.n_D_bins)
 
         self.mean = self._mean()
+        self.median = self._median()
         self.cdf = self._cdf()
         self.percentiles = self._percentiles()
 
     def _mean(self):
+        """Finds the expectation value for each bin.
+
+        At first blush, we don't necessarily care about the full
+        probability distribution.
+        """
+
         retval = np.zeros((2, self.n_A_bins, self.n_P_bins), dtype=np.float32)
         for i in range(self.n_A_bins):
             for j in range(self.n_P_bins):
-                retval[0][i][j] = np.sum(self.bins_A*self.decay_hist[0][i][j])
-                retval[1][i][j] = np.sum(self.bins_P*self.decay_hist[1][i][j])
-
-        # # Mean the means to fill in the 0's
-        # for i in range(self.n_A_bins):
-        #     for j in range(self.n_P_bins):
-        #         for k in range(2):
-        #             inputs = [retval[k][i][j]]
-
-        #             if 0 < j:inputs.append(retval[k][i][j-1])
-        #             inputs.append(retval[k][i][j])
-        #             if self.n_P_bins-1>j: inputs.append(retval[k][i][j+1])
-
-        #             if 0 < i:
-        #                 if 0 < j: inputs.append(retval[k][i-1][j-1])
-        #                 inputs.append(retval[k][i-1][j])
-        #                 if self.n_P_bins-1>j:inputs.append(retval[k][i-1][j+1])
-
-        #             if self.n_A_bins-1 < i:
-        #                 if 0 < j: inputs.append(retval[k][i+1][j-1])
-        #                 inputs.append(retval[k][i+1][j])
-        #                 if self.n_P_bins-1>j:inputs.append(retval[k][i+1][j+1])
-        #             retval[k][i][j] = np.mean(inputs)
+                retval[0][i][j] = np.sum(self.bins_Ad*self.decay_hist[0][i][j])
+                retval[1][i][j] = np.sum(self.bins_Pd*self.decay_hist[1][i][j])
 
         return retval
 
     def index_array(self, data, axis='A'):
+        """Takes an array of data and gives back the indexes into the bins.
+
+        If you have an array of apogee and perigee values, for
+        example, you may want to know which bins they belong to in the
+        decay_hist.
+        """
         if 'A' == axis:
             min_val = self.Ap_min
             max_val = self.Ap_max
@@ -140,17 +139,57 @@ class MoralDecay(object):
 
         return retval.astype(np.int8)
 
-    def plot_mesh(self, path):
+    def plot_mesh(self, path, data='median', axis='A'):
+        """Plots a 2-axis mesh of showing A/P/Z where Z is usually median.
+
+        data: mean or median
+        axis: A or P
+
+        Lets you get a quick visual representation of the historical
+        values.
+        """
+
+        logging.info(f"Plotting PColorMesh to {path}")
+        logging.info(f"  {self.Ap_min}, {self.Ap_max}")
+
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(1, 1, 1)
-        ax.set_xlabel('Apogee Bin')
-        ax.set_ylabel('Perigee Bin')
+        ax.set_ylabel('Apogee Bin')
+        ax.set_xlabel('Perigee Bin')
         fig.suptitle('dA/dt (km/day)')
-        c = ax.pcolor(self.mean[0])
+
+        idx = 0 if 'A' == axis else 1
+        src = self.median if 'median' == data else self.mean
+        c = ax.pcolor(src[idx])
+
+        print(src[idx].shape)
+
+        print("=== WTF ===")
+        print(self.bins_Ap[0], self.Ap_min)
+        print(self.bins_Ap[-1], self.Ap_max)
+        print(self.dAp)
+        bins_A = (self.bins_Ap * 100).astype(np.int).astype(np.float32)/100.0
+        bins_P = (self.bins_Pp * 100).astype(np.int).astype(np.float32)/100.0
+
+        print(self.bins_Ap)
+
+        #ax.set_ylim(bins_A[0], bins_A[-1])
+        #ax.set_yticklabels(bins_A)
+        print(bins_A)
+        print("=== huh??? ===")
+        #ax.set_xlim(bins_P[0], bins_P[-1])
+        #ax.set_xticklabels(bins_P)
+
         fig.colorbar(c, ax=ax)
         fig.savefig(path)
 
     def plot_dA_vs_P(self, path):
+        """Stem plot of dA/dt vs perigee.
+
+        Since it's usually the perigee value that dominates the loss
+        of orbital energy (at least for atmospheric decay which is
+        largely what we're tracking here) I have a special method for it.
+        """
         #Z = np.sum(self.decay_hist[0], axis=0) * self.dPd + self.Pd_min
 
         for i in range(self.n_A_bins):
@@ -166,6 +205,11 @@ class MoralDecay(object):
             gc.collect()
 
     def _cdf(self):
+        """Continuous Distribution Function of the frequency histograms.
+
+        returns np array of the same shape as decay_hist, but instead
+        of being a PMF in the Z axis, it's a CDF.
+        """
         cdf = np.copy(self.decay_hist)
         for i in range(self.n_A_bins):
             for j in range(self.n_P_bins):
@@ -174,7 +218,15 @@ class MoralDecay(object):
         return cdf
 
     def _percentiles(self):
-        pct = np.copy(self.cdf)
+        """Finds the bin for the given percentile.
+
+        If, for example, you have 20 bins, then you will have 5%
+        increments.  The first bin is always 0, and the last bin is
+        always n_D_bins - 1.
+
+        returns [2][n_A][n_P][n_D], type=int8
+        """
+        pct = np.copy(self.cdf).astype(np.int8)
         for i in range(2):
             for An in range(self.n_A_bins):
                 for Pn in range(self.n_P_bins):
@@ -190,6 +242,21 @@ class MoralDecay(object):
                         pct[i][An][Pn][Dn] = val
                     pct[i][An][Pn][self.n_D_bins-1] = self.n_D_bins-1
         return pct
+
+    def _median(self):
+        """Finds the median value for each bin.
+
+        At first blush, we don't necessarily care about the full
+        probability distribution.
+        """
+
+        retval = np.zeros((2, self.n_A_bins, self.n_P_bins), dtype=np.float32)
+        for i in range(self.n_A_bins):
+            for j in range(self.n_P_bins):
+                retval[0][i][j] = np.median(self.decay_hist[0][i][j])
+                retval[1][i][j] = np.median(self.decay_hist[1][i][j])
+
+        return retval
 
 class Jazz(object):
 
@@ -417,7 +484,6 @@ class Jazz(object):
 
         It's a lot of repeated drudgery so we combine it here.
         """
-
 
         # Clipping the arrays necessitates having access to a single
         # concatenated array.

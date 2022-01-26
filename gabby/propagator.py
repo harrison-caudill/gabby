@@ -61,14 +61,20 @@ class StatsPropagator(object):
         m.update(str(vals).encode())
         return m.hexdigest()
 
+    def _sats_hash(self, cfg):
+        sats = json.loads(cfg['historical-asats'])
+        m = hashlib.sha256()
+        m.update((','.join(sorted(sats))).encode())
+        return m.hexdigest()
+
     def _deriv_cache_name(self, stats_cfg):
-        return 'deriv-' + self._cfg_hash(stats_cfg)
+        return 'deriv-' + self._sats_hash(stats_cfg)
 
     def _decay_cache_name(self, stats_cfg):
         return 'moral_decay-' + self._cfg_hash(stats_cfg)
 
     def _filtered_cache_name(self, stats_cfg):
-        return 'filtered-' + self._cfg_hash(stats_cfg)
+        return 'filtered-' + self._sats_hash(stats_cfg)
 
     def _init_global_stats(self):
         """Ensures the instance has a copy of MoralDecay in memory.
@@ -125,7 +131,7 @@ class StatsPropagator(object):
             logging.info(f"  Adding a little moral decay to the cache")
             self.global_cache[decay_name] = decay
 
-        decay.plot_mesh('output/mesh.png')
+        decay.plot_mesh('output/mesh.png', data='median')
         #decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
 
     def propagate(self, data, fwd=True, rev=True):
