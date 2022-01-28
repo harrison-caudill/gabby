@@ -146,29 +146,35 @@ class StatsPropagator(object):
 
         dt = data.dt.total_seconds()/24/3600.0
 
+        decay_alt = self.tgt.getint('decay-altitude')
+
         for i in range(N-1):
             for j in range(L):
                 A = data.As[i][j]
                 P = data.Ps[i][j]
                 if A and not data.As[i+1][j]:
+                    assert(A > P)
+                    if P <= decay_alt: continue
+
                     # predict the next value
                     assert(dt)
                     idx_A = int((A - self.decay.Ap_min) / self.decay.dAp)
                     idx_P = int((P - self.decay.Pp_min) / self.decay.dPp)
-                    rate_A = self.decay.mean[0][idx_A][idx_P]
+                    rate_A = self.decay.median[0][idx_A][idx_P]
+                    rate_P = self.decay.median[1][idx_A][idx_P]
+                    if not rate_A:
+                        print(self.decay.median[0])
+                        print(idx_A, A, rate_A)
+                        print(idx_P, P, rate_P)
                     assert(rate_A)
-                    rate_P = self.decay.mean[1][idx_A][idx_P]
                     delta_A = dt * rate_A
                     delta_P = dt * rate_P
-                    data.As[i+1][j] = A + delta_A
-                    data.Ps[i+1][j] = P + delta_P
+                    data.As[i+1][j] = A - delta_A
+                    data.Ps[i+1][j] = P - delta_P
                     data.Ts[i+1][j] = keplerian_period(data.As[i+1][j], data.Ps[i+1][j])
                     data.valid[i+1][j] = 1
                     assert(data.As[i+1][j])
                     assert(data.As[i+1][j] != A)
-                    # print(i, j)
-                    # print(P, delta_A)
-                    # print()
 
         # Update the scope table so we actually plot things
         for frag in data.names:

@@ -94,8 +94,8 @@ class MoralDecay(object):
         self.bins_Pd = np.linspace(Pd_min, Pd_max, self.n_D_bins)
 
         self.mean = self._mean()
-        self.median = self._median()
         self.cdf = self._cdf()
+        self.median = self._median(kernel=np.ones(25).reshape((5,5)))
         self.percentiles = self._percentiles()
 
     def _mean(self):
@@ -126,7 +126,6 @@ class MoralDecay(object):
             step = self.dAp
             logging.info(f"Indexing Array")
             logging.info(f"  range: {min_val} => {max_val}")
-            pprint.pprint(data)
         else:
             min_val = self.Pp_min
             max_val = self.Pp_max
@@ -162,21 +161,11 @@ class MoralDecay(object):
         src = self.median if 'median' == data else self.mean
         c = ax.pcolor(src[idx])
 
-        print(src[idx].shape)
-
-        print("=== WTF ===")
-        print(self.bins_Ap[0], self.Ap_min)
-        print(self.bins_Ap[-1], self.Ap_max)
-        print(self.dAp)
         bins_A = (self.bins_Ap * 100).astype(np.int).astype(np.float32)/100.0
         bins_P = (self.bins_Pp * 100).astype(np.int).astype(np.float32)/100.0
 
-        print(self.bins_Ap)
-
         #ax.set_ylim(bins_A[0], bins_A[-1])
         #ax.set_yticklabels(bins_A)
-        print(bins_A)
-        print("=== huh??? ===")
         #ax.set_xlim(bins_P[0], bins_P[-1])
         #ax.set_xticklabels(bins_P)
 
@@ -243,7 +232,7 @@ class MoralDecay(object):
                     pct[i][An][Pn][self.n_D_bins-1] = self.n_D_bins-1
         return pct
 
-    def _median(self):
+    def _median(self, kernel=None):
         """Finds the median value for each bin.
 
         At first blush, we don't necessarily care about the full
@@ -256,7 +245,12 @@ class MoralDecay(object):
                 retval[0][i][j] = np.median(self.decay_hist[0][i][j])
                 retval[1][i][j] = np.median(self.decay_hist[1][i][j])
 
+        if kernel is not None:
+            retval[0] = scipy.signal.convolve2d(retval[0], kernel, mode='same')
+            retval[1] = scipy.signal.convolve2d(retval[1], kernel, mode='same')
+
         return retval
+
 
 class Jazz(object):
 
