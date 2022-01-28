@@ -7,20 +7,39 @@ import logging
 import matplotlib
 import matplotlib.pyplot as plt
 import os
-import pprint
-import subprocess
+import shutil
 import sys
 
 import gabby
 
 
 if __name__ == '__main__':
-    desc = """Produces the video
+    desc = """Testing utility.
+
+Right now, it just builds fake DBs.
     """
 
     formatter = argparse.RawTextHelpFormatter
     parser = argparse.ArgumentParser(description=desc,
                                      formatter_class=formatter)
+
+    parser.add_argument('--full-db-path', '-u',
+                        metavar='FULL_DB_PATH',
+                        action='store',
+                        dest='full_db_path',
+                        required=False,
+                        type=str,
+                        default='output/test_full.db',
+                        help='Location of the full lmdb (%(default)s)')
+
+    parser.add_argument('--fragment-db-path', '-a',
+                        metavar='FRAGMENT_DB_PATH',
+                        action='store',
+                        dest='frag_db_path',
+                        required=False,
+                        type=str,
+                        default='output/test_frag.db',
+                        help='Location of the fragments lmdb (%(default)s)')
 
     parser.add_argument('--config-file', '-c',
                         metavar='CONFIG_PATH',
@@ -28,7 +47,7 @@ if __name__ == '__main__':
                         dest='cfg',
                         required=False,
                         type=str,
-                        default='cfg/asat.cfg',
+                        default='test/test.cfg',
                         help='Path to the config file (%(default)s)')
 
     parser.add_argument('--target', '-t',
@@ -37,8 +56,8 @@ if __name__ == '__main__':
                         dest='tgt',
                         required=False,
                         type=str,
-                        default='nudol',
-                        help='The ASAT to build video for (%(default)s)')
+                        default='single',
+                        help='The config target (%(default)s)')
 
     parser.add_argument('--num-threads', '-n',
                         metavar='NUM_THREADS',
@@ -46,12 +65,8 @@ if __name__ == '__main__':
                         dest='n_threads',
                         required=False,
                         type=int,
+                        default=1,
                         help='The number of threads to use (%(default)s)')
-
-    parser.add_argument('--yes', '-y',
-                        action='store_true',
-                        dest='yes',
-                        help='Overwrite the old video')
 
     parser.add_argument('--output-directory', '-o',
                         metavar='OUTPUT_DIR',
@@ -67,7 +82,7 @@ if __name__ == '__main__':
                         action='store',
                         dest='log_file',
                         type=str,
-                        default='%(output_dir)s/plot-%(tgt)s.log',
+                        default='%(output_dir)s/test.log',
                         help='Logfile in output directory (%(default)s)')
 
     parser.add_argument('--log-level', '-L',
@@ -83,6 +98,14 @@ if __name__ == '__main__':
                                  'debug'],
                         help='Log level to use (%(default)s)')
 
+    parser.add_argument('cmd',
+                        metavar='COMMAND',
+                        action='store',
+                        type=str,
+                        choices=['build',],
+                        help='Command to execute')
+
+
     args = parser.parse_args()
 
 
@@ -93,44 +116,52 @@ if __name__ == '__main__':
     # Get our output directory all set up
     output_dir = args.output_dir % arg_dict
     arg_dict['output_dir'] = output_dir
+
     gabby.mkdir_p(output_dir)
 
     # Get set up to log
     log_file = args.log_file%arg_dict
     gabby.setup_logging(log_file=log_file,
                         log_level=args.log_level)
-    logging.info(f"Let's go, Lucas!")
+    logging.info(f"Giddy up, Gabby!")
 
     # Load the config file
     logging.info(f"Loading config file: {args.cfg}")
     cfg = configparser.ConfigParser(allow_no_value=True)
     cfg.read(args.cfg)
 
-    # Find the target
-    tgt = cfg['gabby-'+args.tgt]
+    # Disable interactive mode in matplotlib to speed up plot
+    # generation and save memory
+    plt.ioff()
+    matplotlib.use('TkAgg')
 
-    # Aaaaaaannnnd ACTION!
-    start_d = gabby.parse_date_d(tgt['start-date'])
-    end_d = gabby.parse_date_d(tgt['end-date'])
-    plot_period = tgt.getint('plot-period')
-    dt = datetime.timedelta(days=plot_period)
-    last_idx = int((end_d - start_d) / dt)
-    n_digits = len(str(last_idx))
-    video_path = os.path.abspath(os.path.join(output_dir,
-                                              tgt['video-filename']))
-    img_path = os.path.abspath(os.path.join(output_dir, 'gabby-img'))
+    full_db_path = args.full_db_path % arg_dict
+    frag_db_path = args.frag_db_path % arg_dict
 
-    # f/s = (d/s) / (d/f)
-    framerate = int(tgt.getint('days-per-sec') / plot_period)
+    if args.cmd == 'build':
+        tgt = cfg['db-'+args.tgt]
 
-    cmd = [
-        'ffmpeg',
-        '-r', str(framerate),
-        '-i', f"%0{n_digits}d.png",
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        ]
-    if args.yes: cmd.append('-y')
-    cmd.append(video_path)
-    logging.info(f"  FFMPEG Command: {pprint.pformat(cmd)}")
-    subprocess.call(cmd, cwd=img_path)
+        faker = gabby.FakeDB(cfg, tgt,
+                             output_dir=output_dir,
+                             full_path=full_db_path,
+                             frag_path=frag_db_path)
+        faker.build_single()
+        jazz = gabby.Jazz(cfg,
+                          faker.full_env,
+                          faker.full_apt,
+                          faker.full_tle,
+                          faker.full_scope)
+        frags, apt, deriv, N = jazz.derivatives(priors=['99025A'],
+                                                fltr=jazz.lpf())
+        wat = jazz.decay_rates(apt, deriv, N,
+                               mesh_output='output/single-mesh.png')
+        # (moral_decay,
+        #  bins_A, bins_P,
+        #  Ap, Ad, Pp, Pd,) = 
+        # n_A = len(bins_A)
+        # n_P = len(bins_P)
+        # n_D = len(moral_decay[0][0][0])
+        
+
+    else:
+        logging.critical(f"WHAT DID YOU DO??? {args.cmd}")

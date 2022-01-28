@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+
+import argparse
+import configparser
+import datetime
+import lmdb
+import logging
+import matplotlib
+import matplotlib.pyplot as plt
+import os
+import shutil
+import sys
+
+import gabby
+
+
+if __name__ == '__main__':
+    desc = """Generate a db with a subset of the data
+
+    
+    """
+
+    formatter = argparse.RawTextHelpFormatter
+    parser = argparse.ArgumentParser(description=desc,
+                                     formatter_class=formatter)
+
+    parser.add_argument('--input-db-path', '-I',
+                        metavar='FULL_DB_PATH',
+                        action='store',
+                        dest='input_db_path',
+                        required=False,
+                        type=str,
+                        default='output/tle.db',
+                        help='Location of the input lmdb (%(default)s)')
+
+    parser.add_argument('--output-db-path', '-O',
+                        metavar='FULL_DB_PATH',
+                        action='store',
+                        dest='output_db_path',
+                        required=False,
+                        type=str,
+                        default='output/fragments.db',
+                        help='Location of the output lmdb (%(default)s)')
+
+    parser.add_argument('--config-file', '-c',
+                        metavar='CONFIG_PATH',
+                        action='store',
+                        dest='cfg',
+                        required=False,
+                        type=str,
+                        default='cfg/asat.cfg',
+                        help='Path to the config file (%(default)s)')
+
+    parser.add_argument('--cache-path', '-C',
+                        metavar='CACHE_PATH',
+                        action='store',
+                        dest='cfg',
+                        required=False,
+                        type=str,
+                        default='cfg/asat.cfg',
+                        help='Pickle the numpy APT values (%(default)s)')
+
+    parser.add_argument('--output-directory', '-o',
+                        metavar='OUTPUT_DIR',
+                        action='store',
+                        dest='output_dir',
+                        required=False,
+                        type=str,
+                        default='output',
+                        help='Output directory (%(default)s)',)
+
+    parser.add_argument('--log-file', '-l',
+                        metavar='LOG_FILE',
+                        action='store',
+                        dest='log_file',
+                        type=str,
+                        default='%(output_dir)s/subdivide.log',
+                        help='Logfile (%(default)s)')
+
+    parser.add_argument('--log-level', '-L',
+                        metavar='LOG_LEVEL',
+                        action='store',
+                        dest='log_level',
+                        type=str,
+                        default='info',
+                        choices=['critical',
+                                 'error',
+                                 'warning',
+                                 'info',
+                                 'debug'],
+                        help='Log level to use (%(default)s)')
+
+    args = parser.parse_args()
+
+
+    arg_dict = {
+        }
+
+    # Get our output directory all set up
+    output_dir = args.output_dir % arg_dict
+    arg_dict['output_dir'] = output_dir
+    gabby.mkdir_p(output_dir)
+
+    # Get set up to log
+    log_file = args.log_file%arg_dict
+    gabby.setup_logging(log_file=log_file,
+                        log_level=args.log_level)
+    logging.info(f"Giddy up, Gabby!")
+
+    # Load the config file
+    logging.info(f"Loading config file: {args.cfg}")
+    cfg = configparser.ConfigParser(allow_no_value=True)
+    cfg.read(args.cfg)
+
+    input_db_path = args.input_db_path % arg_dict
+    in_env = lmdb.Environment(input_db_path,
+                              max_dbs=len(gabby.DB_NAMES),
+                              map_size=int(gabby.DB_MAX_LEN))
+    in_tle = in_env.open_db(gabby.DB_NAME_TLE.encode())
+    in_apt = in_env.open_db(gabby.DB_NAME_APT.encode())
+    in_scope = in_env.open_db(gabby.DB_NAME_SCOPE.encode())
+    in_txn = lmdb.Transaction(in_env, write=False)
+
+    output_db_path = args.output_db_path % arg_dict
+    out_env = lmdb.Environment(output_db_path,
+                               max_dbs=len(gabby.DB_NAMES),
+                               map_size=int(gabby.DB_MAX_LEN))
+    out_tle = out_env.open_db(gabby.DB_NAME_TLE.encode())
+    out_apt = out_env.open_db(gabby.DB_NAME_APT.encode())
+    out_scope = out_env.open_db(gabby.DB_NAME_SCOPE.encode())
+    out_txn = lmdb.Transaction(out_env, write=True)
+
+    base_des = cfg['general']['historical-asats'].strip().split(',')
+    base_des = [s.strip() for s in base_des]
+
+    fragments = gabby.find_daughter_fragments(base_des, in_txn, in_scope)
+
+    apt_cursor = in_txn.cursor(db=in_apt)
+    tle_cursor = in_txn.cursor(db=in_tle)
+    for f in fragments:
+        prefix = f"{f},".encode()
+
+        v = in_txn.get(f.encode(), db=in_scope)
+        out_txn.put(f.encode(), db=out_scope, overwrite=True)
+
+        apt_cursor.set_range(prefix)
+        for k, v in apt_cursor:
+            if not k.startswith(prefix): break
+            out_txn.put(k, v, db=out_apt, overwrite=True)
+
+        tle_cursor.set_range(prefix)
+        for k, v in tle_cursor:
+            if not k.startswith(prefix): break
+            out_txn.put(k, v, db=out_tle, overwrite=True)
+
+    out_txn.commit()

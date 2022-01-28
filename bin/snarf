@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import logging
@@ -22,8 +22,13 @@ if __name__ == '__main__':
                         dest='db_path',
                         required=False,
                         type=str,
-                        default='tle.db',
-                        help='Location of the lmdb (%(default)s)')
+                        default='output/tle.db',
+                        help='Location of the tle lmdb (%(default)s)')
+
+    parser.add_argument('--force', '-f',
+                        action='store_true',
+                        dest='force',
+                        help='Re-import even if present (%(default)s)')
 
     parser.add_argument('--output-directory', '-o',
                         metavar='OUTPUT_DIR',
@@ -34,14 +39,23 @@ if __name__ == '__main__':
                         default='output',
                         help='Output directory (%(default)s)',)
 
-    parser.add_argument('--staging-directory', '-s',
-                        metavar='STAGING_DIR',
+    parser.add_argument('--designator-base', '-D',
+                        metavar='DESIGNATOR',
                         action='store',
-                        dest='staging_dir',
+                        dest='designator',
                         required=False,
                         type=str,
-                        default='staging',
-                        help='Staging directory (%(default)s)',)
+                        help='Base designator to focus snarfing (%(default)s)',)
+
+    parser.add_argument('--store-tles', '-s',
+                        action='store_true',
+                        dest='store_tles',
+                        help='Store the full TLE information (%(default)s)',)
+
+    parser.add_argument('--index', '-I',
+                        action='store_true',
+                        dest='index',
+                        help='Build the indexes rather than snarf',)
 
     parser.add_argument('--log-file', '-l',
                         metavar='LOG_FILE',
@@ -66,6 +80,7 @@ if __name__ == '__main__':
 
     parser.add_argument('tle_path',
                         metavar='TLE_PATH',
+                        nargs='?',
                         action='store',
                         type=str,
                         help='File to snarf in')
@@ -90,7 +105,31 @@ if __name__ == '__main__':
 
     # Go find the undertaker
     db_path = args.db_path % arg_dict
-    under = gabby.Undertaker(staging_dir=args.staging_dir,
-                             db_path=db_path)
+    db = gabby.GabbyDB(db_path)
+    under = gabby.Undertaker(db=db)
     logging.info("The Undertaker is In")
-    under.load_tlefile(args.tle_path)
+
+    # txn = db.txn(write=False)
+    # cursor = txn.cursor(db=db.db_apt)
+    # cursor.set_range(','.encode())
+    # i = 0
+    # for k, v, in cursor:
+    #     i += 1
+    #     if not k.startswith(','.encode()): break
+    # print(i)
+    # sys.exit(0)
+
+    if args.index:
+        under.build_scope()
+
+    elif args.tle_path:
+        if args.tle_path.endswith('json'):
+            under.load_json(args.tle_path,
+                            base_des=args.designator,
+                            store_tles=args.store_tles,
+                            force=args.force)
+        else:
+            under.load_tlefile(args.tle_path,
+                               base_des=args.designator,
+                               store_tles=args.store_tles,
+                               force=args.force)

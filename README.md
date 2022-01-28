@@ -236,3 +236,12 @@ To Do
  * Add historical solar activity into the lower plot on the gabby
    plot indicating level of solar activity, probably as background
    shading or something.
+
+ * Make sure the snarfer works with leap seconds...or determine if we
+   just don't care.  I guess we'd be up to 1 second off since we use
+   datetime to compute the starting offsets on a per-day basis.  Even
+   then, we still compute a number of seconds into that day, and we
+   have that day's offset, so it isn't totally clear that this is even
+   a problem.  There have also been something like 24 recorded
+   leap-seconds in the history of leap-seconds so...maybe add it to
+   the list-o-unittests I should write?

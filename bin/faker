@@ -7,20 +7,28 @@ import logging
 import matplotlib
 import matplotlib.pyplot as plt
 import os
-import pprint
-import subprocess
+import shutil
 import sys
 
 import gabby
 
 
 if __name__ == '__main__':
-    desc = """Produces the video
+    desc = """Builds a fake DB.
     """
 
     formatter = argparse.RawTextHelpFormatter
     parser = argparse.ArgumentParser(description=desc,
                                      formatter_class=formatter)
+
+    parser.add_argument('--db-path', '-d',
+                        metavar='DB_PATH',
+                        action='store',
+                        dest='db_path',
+                        required=False,
+                        type=str,
+                        default='output/faker.db',
+                        help='Location of the lmdb (%(default)s)')
 
     parser.add_argument('--config-file', '-c',
                         metavar='CONFIG_PATH',
@@ -28,7 +36,7 @@ if __name__ == '__main__':
                         dest='cfg',
                         required=False,
                         type=str,
-                        default='cfg/asat.cfg',
+                        default='gabby/test/test.cfg',
                         help='Path to the config file (%(default)s)')
 
     parser.add_argument('--target', '-t',
@@ -37,21 +45,8 @@ if __name__ == '__main__':
                         dest='tgt',
                         required=False,
                         type=str,
-                        default='nudol',
-                        help='The ASAT to build video for (%(default)s)')
-
-    parser.add_argument('--num-threads', '-n',
-                        metavar='NUM_THREADS',
-                        action='store',
-                        dest='n_threads',
-                        required=False,
-                        type=int,
-                        help='The number of threads to use (%(default)s)')
-
-    parser.add_argument('--yes', '-y',
-                        action='store_true',
-                        dest='yes',
-                        help='Overwrite the old video')
+                        default='single-linear',
+                        help='The db to build (%(default)s)')
 
     parser.add_argument('--output-directory', '-o',
                         metavar='OUTPUT_DIR',
@@ -59,15 +54,20 @@ if __name__ == '__main__':
                         dest='output_dir',
                         required=False,
                         type=str,
-                        default='output/%(tgt)s',
+                        default='output',
                         help='Output directory (%(default)s)',)
+
+    parser.add_argument('--clean', '-C',
+                        action='store_true',
+                        dest='clean',
+                        help='Cleans the target directory before plotting',)
 
     parser.add_argument('--log-file', '-l',
                         metavar='LOG_FILE',
                         action='store',
                         dest='log_file',
                         type=str,
-                        default='%(output_dir)s/plot-%(tgt)s.log',
+                        default='%(output_dir)s/%(tgt)s/plot.log',
                         help='Logfile in output directory (%(default)s)')
 
     parser.add_argument('--log-level', '-L',
@@ -99,7 +99,7 @@ if __name__ == '__main__':
     log_file = args.log_file%arg_dict
     gabby.setup_logging(log_file=log_file,
                         log_level=args.log_level)
-    logging.info(f"Let's go, Lucas!")
+    logging.info(f"Giddy up, Gabby!")
 
     # Load the config file
     logging.info(f"Loading config file: {args.cfg}")
@@ -107,30 +107,9 @@ if __name__ == '__main__':
     cfg.read(args.cfg)
 
     # Find the target
-    tgt = cfg['gabby-'+args.tgt]
+    tgt = cfg['db-'+args.tgt]
 
-    # Aaaaaaannnnd ACTION!
-    start_d = gabby.parse_date_d(tgt['start-date'])
-    end_d = gabby.parse_date_d(tgt['end-date'])
-    plot_period = tgt.getint('plot-period')
-    dt = datetime.timedelta(days=plot_period)
-    last_idx = int((end_d - start_d) / dt)
-    n_digits = len(str(last_idx))
-    video_path = os.path.abspath(os.path.join(output_dir,
-                                              tgt['video-filename']))
-    img_path = os.path.abspath(os.path.join(output_dir, 'gabby-img'))
-
-    # f/s = (d/s) / (d/f)
-    framerate = int(tgt.getint('days-per-sec') / plot_period)
-
-    cmd = [
-        'ffmpeg',
-        '-r', str(framerate),
-        '-i', f"%0{n_digits}d.png",
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        ]
-    if args.yes: cmd.append('-y')
-    cmd.append(video_path)
-    logging.info(f"  FFMPEG Command: {pprint.pformat(cmd)}")
-    subprocess.call(cmd, cwd=img_path)
+    # Build the on-disk DB object
+    db_path = args.db_path % arg_dict
+    faker = gabby.FakeDB(cfg, tgt, db_path=db_path)
+    faker.build_linear()
