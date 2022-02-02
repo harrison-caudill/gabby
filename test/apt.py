@@ -112,26 +112,32 @@ def sim_apt(des, tlefile=None, dt_min=1):
     mu = 3.986004418e5 # km^3 / s^2
     one_day = datetime.timedelta(days=1).total_seconds()
 
+    dadt_factor = 1.95
+    drdt_factor = 2.05**-1
+
     def __dadt__(a, inc, ecc):
         # See Fundamentals of Astrodynamics (the Dover one) page 128
         c1 = 1.03237e14
         retval = c1*a**-3.5 * (4-5*np.sin(inc)**2)*(1-ecc**2)**-2
 
-        # FIXME: For some reason, a factor of 2 here makes it match
-        # much more closely...
-        retval *= 2
+        # FIXME: For some reason, we seem to be off by a factor here...
+        retval *= dadt_factor
 
         return retval
 
     def __drdt__(a, inc, ecc):
-        # See Fundamentals of Astrodynamics (the Dover one) page 127
+        # See Fundamentals of Astrodynamics (the Dover one) page 127.
         c1 = -2.06474e14
         c2 = -3.5
         retval = c1*a**c2 * np.cos(inc) * (1-ecc**2)**-2
 
-        # FIXME: For some reason, a factor of 2 here makes it match
-        # much more closely...
-        retval /= 2
+        # FIXME: For some reason, we seem to be off by a factor here...
+        retval *= drdt_factor
+
+        # Note that it's the Nodal *Regression* rate defined on that
+        # page, which means that for it to be the dr/dt, we need to
+        # make it negative.
+        retval *= -1
 
         return retval
 
@@ -232,13 +238,12 @@ def sim_apt(des, tlefile=None, dt_min=1):
 
         if 0 == i:
             raan_s[i] = raan_k[i] = raan_t[i]
+            argp_s[i] = argp_k[i] = argp_t[i]
         else:
             dt = (E_k[i].timestamp()-E_k[i-1].timestamp())/one_day
-            # FIXME: I'm guessing there's a sign-error above, probably
-            # related to the implied direction of travel.
-            raan_k[i] = raan_k[i-1] + -1.0 * drdt_k[i] * dt
+            raan_k[i] = raan_k[i-1] + drdt_k[i] * dt
             argp_k[i] = argp_k[i-1] + dadt_k[i] * dt
-            raan_s[i] = raan_s[i-1] + -1.0 * drdt_s[i] * dt
+            raan_s[i] = raan_s[i-1] + drdt_s[i] * dt
             argp_s[i] = argp_s[i-1] + dadt_s[i] * dt
 
     # Done with the propagation, let's plot the results
@@ -276,7 +281,7 @@ def sim_apt(des, tlefile=None, dt_min=1):
                 mode="expand",
                 borderaxespad=0)
     ax_e.set_xlabel("Observation Date")
-    ax_e.set_ylabel("Specific Mechanical Energy (J/kg)")
+    ax_e.set_ylabel("Specific Mechanical Energy (MJ/kg)")
 
     # Angular axis
     k = np.pi/180
