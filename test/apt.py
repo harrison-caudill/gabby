@@ -246,11 +246,43 @@ def sim_apt(des, tlefile=None, dt_min=1):
             raan_s[i] = raan_s[i-1] + drdt_s[i] * dt
             argp_s[i] = argp_s[i-1] + dadt_s[i] * dt
 
+    def __crossings__(arr, val):
+        arr = np.copy(arr)
+        L = len(arr)
+
+        x = np.where(arr >= val, 0, 1)
+        y = np.diff(x)
+        z = np.where(y == 0, 0, 1)
+
+        # Real crossings survive a 180-degree flip
+        survivors = z
+        arr += 180
+        arr %= 360
+        val += 180
+        val %= 360
+
+        x = np.where(arr >= val, 0, 1)
+        y = np.diff(x)
+        z = np.where(y == 0, 0, 1)
+
+        z *= survivors
+
+        idx = np.linspace(1, L-1, L-1)
+        retval = np.nonzero(z * idx)[0].astype(np.int)
+        return retval
+
+    def __interesting_crossings__(arr):
+        vals = [90, 270]
+        retval = np.sort(np.concatenate([__crossings__(arr, v) for v in vals]))
+        return retval
+
     # Done with the propagation, let's plot the results
     fig = plt.figure(figsize=(12, 8), dpi=600)
 
     # Legend labels
     lbls = []
+
+    crossings = __interesting_crossings__(argp_t)
 
     # Position axis
     ax_p = fig.add_subplot(2, 1, 1)
@@ -262,6 +294,13 @@ def sim_apt(des, tlefile=None, dt_min=1):
     lbls += ax_p.plot(E_k, Ap_k, '-', color=CA, label='Apogee (Keplerian)')
     lbls += ax_p.plot(E_k, Pp_s, '--', color=CP, label='Perigee (SGP4)')
     lbls += ax_p.plot(E_k, Pp_k, '-', color=CP, label='Perigee (Keplerian)')
+    lbls += ax_p.plot([E_k[i] for i in crossings],
+                      [Ap_s[i] for i in crossings],
+                      'x', color='black', label='Polar Perigee Crossing')
+    ax_p.plot([E_k[i] for i in crossings],
+              [Pp_s[i] for i in crossings],
+              'x', color='black', label='Equatorial Perigee')
+
     ax_p.legend(lbls, [l.get_label() for l in lbls],
                 bbox_to_anchor=(.75, .35, .2, 4),
                 loc='lower left',
@@ -280,12 +319,25 @@ def sim_apt(des, tlefile=None, dt_min=1):
                 ncol=2,
                 mode="expand",
                 borderaxespad=0)
+    ax_e.plot([E_k[i] for i in crossings],
+              [Au_s[i] for i in crossings],
+              'x', color='black', label='Crossing')
+    ax_e.plot([E_k[i] for i in crossings],
+              [Pu_s[i] for i in crossings],
+              'x', color='black', label='Equatorial Perigee')
+
     ax_e.set_xlabel("Observation Date")
     ax_e.set_ylabel("Specific Mechanical Energy (MJ/kg)")
 
     # Angular axis
+
     k = np.pi/180
     ax_a = fig.add_subplot(2, 2, 4, projection='polar')
+
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.75)
+    ax_a.text(-.25, 1, "FIXME: Off by factor of ~2",
+              transform=ax_a.transAxes, bbox=props)
+
     angular_t = ((np.array([t.timestamp() for t in E_k])
                   - E_k[0].timestamp())
                  / one_day)
@@ -294,6 +346,11 @@ def sim_apt(des, tlefile=None, dt_min=1):
 
     rcs = ax_a.plot(k*raan_s, angular_t, '--', color=CA, label='RAAN (SGP4)')
     acs = ax_a.plot(k*argp_s, angular_t, '--', color=CP, label='ArgP (SGP4)')
+
+    ax_a.plot([k*argp_t[i] for i in crossings],
+              [angular_t[i] for i in crossings],
+              'x', color='black', label='Equatorial Perigee')
+
 
     # rck = ax_a.plot(k*raan_k, angular_t, linestyle=(0, (5, 1)), color=CA, label='RAAN (Keplerian)')
     # rck = ax_a.plot(k*argp_k, angular_t, linestyle=(0, (5, 1)), color=CP, label='ArgP (Keplerian)')
