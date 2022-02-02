@@ -330,7 +330,6 @@ def sim_apt(des, tlefile=None, dt_min=1):
     ax_e.set_ylabel("Specific Mechanical Energy (MJ/kg)")
 
     # Angular axis
-
     k = np.pi/180
     ax_a = fig.add_subplot(2, 2, 4, projection='polar')
 
@@ -372,7 +371,7 @@ def sim_apt(des, tlefile=None, dt_min=1):
                 mode="expand",
                 borderaxespad=0)
 
-    fig.suptitle(f"{des} (inc=%1.1f$^\circ$)" % inc_k[0])
+    fig.suptitle(f"Keplerian Analytical vs SGP4 Propagation for {des} (inc=%1.1f$^\circ$)" % inc_k[0])
 
     fig.tight_layout(h_pad=2)
     fig.subplots_adjust(top=0.9)
