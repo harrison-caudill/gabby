@@ -16,9 +16,12 @@ import sys
 """
 
 
-# Earth constants
-Re_max = 6378
-Re_avg = 6371
+# Earth constants -- km, kg, s
+Re_max = 6378 # km
+Re_avg = 6371 # km
+Me = 5.972e24 # kg
+J2e = 1.7553e10 # km^5/s^2
+G = 6.6743e-20 # km^3 / kg / s
 mu = 3.986004418e5 # km^3 / s^2
 one_day = datetime.timedelta(days=1).total_seconds()
 
@@ -120,12 +123,11 @@ def propagate_one_orbit(tle, epoch, dt_min):
 
 
 def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
-    """Runs the test for an individual TLE.
+    """Propagates a single fragment and compares to observations.
 
     Runs an SGP4 propagation on a series of fragment observations and
     compares the Apogee and Perigee of the simulation vs the assumed
     values from keplerian orbits.
-
 
     # The command-line for gathering the TLEs from the space-track.org
     # tle files (preserved for convenience):
@@ -135,7 +137,7 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
         > ~/dev/gabby/test/${des}.txt
     """
 
-    if not output: output = f"{des}.png"
+    if not output: output = f"sim_apt-{des}.png"
 
     logging.info(f"=== Executing APT Simulation ===")
     logging.info(f"  Designator: {des}")
@@ -261,7 +263,13 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
         R = np.sum(r**2, axis=1)**.5
         Alt = R - Re_avg
         V = np.sum(v**2, axis=1)**.5
-        U = V**2/2 - mu/R # NOTE: We assume a spherical uniform Earth here
+
+        # https://en.wikipedia.org/wiki/Geopotential_model eq 10(.5)
+        z = np.array([r[j][-1] for j in range(N)])
+        J2_term = J2e * R**-5 * 0.5 * (3*z**2 - R**2)
+        U = (V**2/2        # Kinetic Energy
+             + -1.0 * mu/R # Standard Gravitational Potential Energy
+             + J2_term)    # Modification for J2
 
         # Index into the arrays of observations where we can find the
         # apogee and perigee.
@@ -449,6 +457,55 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
     logging.info("")
 
 
+def cmd_tle_var(des, tlefile=None, dt_min=1, output=None):
+    """Examines a fragment's observations for covariance with argp.
+
+    Since the SGP4 outputs are so tightly covariant with the argument
+    of perigee, it is hypothesized that either
+
+      a) Space-Track.org is not accounting for J2 when computing TLE values or
+      b) They ARE accounting for J2 so as to make the naive approach meaningful
+
+    This command will plot various figures of merit to look for that
+    covariance.
+    """
+
+    if not output: output = f"tle_var-{des}.png"
+
+    logging.info(f"=== Seek and Ye Shall Find Correlation ===")
+    logging.info(f"  ...and Causation")
+    logging.info(f"  ...that is absolutely how that works...")
+    logging.info(f"  ...pretty sure anyway...")
+    logging.info(f"  ")
+    logging.info(f"  Designator: {des}")
+    logging.info(f"  Source:     {tlefile}")
+    logging.info(f"  Time step:  {dt_min}")
+    logging.info(f"  Output:     {output}")
+    logging.info(f"")
+
+    (L,       # Number of TLEs parsed
+     tles,    # TLEs: [[<line-1>,<line-2>], ...]
+     E_t,     # Datetime of epoch from TLE        
+     raan_t,  # Right ascension from TLE          
+     argp_t,  # Argument of Perigee from TLE      
+     raan_t,  # Right ascension from keplerian    
+     argp_t,  # Argument of Perigee from keplerian
+     ecc_t,   # eccentricity                      
+     n_t,     # mean motion                       
+     inc_t,   # inclination                       
+     ) = snarf_tles(tlefile)
+
+    b = 42241.122 * n_t**(-2.0/3)
+
+    fig = plt.figure(figsize=(12, 8), dpi=600)
+    ax_argp = fig.add_subplot(1, 1, 1)
+    ax_argp.plot(E_t, argp_t, label='ArgP')
+
+    ax_ecc = ax_argp.twinx()
+    ax_ecc.plot(E_t, b, label='Eccentricity')
+    fig.savefig(output)
+
+
 class ArgWrapper(object):
     """Wrapper class to make the argparser look like a dictionary.
     """
@@ -487,6 +544,14 @@ Using the observations of a single spacecraft, we compute the APT
 values using keplerian methods, and we also compute them using SGP4
 propagation and observe the difference.
 
+
+
+=== TLE Variance (tle_var) ===
+
+With the results of <sim_apt> indicating that some values in the TLEs
+are in a PLL with the Argument of Perigee, this command examines the
+values in the TLEs themselves looking for covariance.
+
 """
     formatter = argparse.RawTextHelpFormatter
     parser = argparse.ArgumentParser(description=desc,
@@ -496,7 +561,7 @@ propagation and observe the difference.
                         metavar='CMD',
                         action='store',
                         type=str,
-                        choices=['sim_apt'],
+                        choices=['sim_apt', 'tle_var'],
                         help='Compare simulations of APT to computations')
 
     parser.add_argument('--tle-file', '-t',
@@ -534,4 +599,8 @@ propagation and observe the difference.
 
     if args.cmd == 'sim_apt':
         cmd_sim_apt(args.des, tlefile=args.tle_file%awrap, dt_min=args.dt_min)
+    elif args.cmd == 'tle_var':
+        cmd_tle_var(args.des, tlefile=args.tle_file%awrap, dt_min=args.dt_min)
+    else:
+        logging.critical(f"What did you do?!?!eleven??1?! {args.cmd}")
 
