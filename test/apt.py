@@ -11,32 +11,8 @@ from sgp4.api import Satrec
 from sgp4.api import jday
 import sys
 
-"""Investigates the impacts of the oblate sphereoid on TLEs/Apogee/...
 
-This is a self-contained test-script designed to illustrate specific
-points.  As such, there are several specific tests with their own
-options.  They're listed below.
-
-
-=== Simulated APT values from Real TLEs (sim_apt) ===
-
-Space-Track.org recommends finding the Apogee/Perigee of an orbit as follows:
-
-    Re_max = 6378                  # Maximum radius of Earth
-    n                              # orbits per day
-    b                              # semi-minor axis
-
-    b = 42241.122 * n**(-2.0/3)    # includes all the Earth constants
-    apogee = b*(1+ecc)-Re_max      # keplerian
-    perigee = b*(1-ecc)-Re_max     # keplerian
-    period = (MINUTES_PER_DAY / n) # keplerian
-
-I make one modification which is to use Re_avg instead.
-
-Using the observations of a single spacecraft, we compute the APT
-values using keplerian methods, and we also compute them using SGP4
-propagation and observe the difference.
-
+"""See the help message for more information.
 """
 
 
@@ -104,7 +80,46 @@ def snarf_tles(tlefile):
             inc_t,)
 
 
-def cmd_sim_apt(des, tlefile=None, dt_min=1):
+def propagate_one_orbit(tle, epoch, dt_min):
+    """Uses SGP4 to propagate the TLE by exactly one orbit (ish).
+    """
+
+    # python-sgp4 representation of a satellite
+    sat = Satrec.twoline2rv(*tle)
+
+    # The mean motion in the sgp4 package appears to be a mean of
+    # mean-motion as days/orbit rather than orbits/day (so inverse of
+    # some averaged value from propagation of the TLE I guess???)
+    T = one_day*sat.nm
+
+    # Find the date-ranges of the simulation
+    start = epoch
+    end = start + datetime.timedelta(seconds=1.1*T)
+    dt = datetime.timedelta(minutes=dt_min)
+    ts = np.arange(start, end, dt)
+    N = len(ts)
+
+    # Generate the arrays of julian dates for the propagation
+    jds = np.zeros(N, dtype=np.int)
+    frs = np.zeros(N, dtype=np.float32)
+    for j in range(N):
+        cur = ts[j].tolist()
+        jd, fr = jday(cur.year,
+                      cur.month,
+                      cur.day,
+                      cur.hour,
+                      cur.minute,
+                      cur.second)
+        jds[j] = jd
+        frs[j] = fr
+
+    # r is an array of N xyz coordinates
+    e, r, v = sat.sgp4_array(jds, frs)
+
+    return ts, N, e, r, v
+
+
+def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
     """Runs the test for an individual TLE.
 
     Runs an SGP4 propagation on a series of fragment observations and
@@ -120,11 +135,16 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1):
         > ~/dev/gabby/test/${des}.txt
     """
 
+    if not output: output = f"{des}.png"
+
     logging.info(f"=== Executing APT Simulation ===")
     logging.info(f"  Designator: {des}")
     logging.info(f"  Source:     {tlefile}")
     logging.info(f"  Time step:  {dt_min}")
+    logging.info(f"  Output:     {output}")
     logging.info(f"")
+
+
 
 
     (L,       # Number of TLEs parsed
@@ -151,6 +171,8 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1):
     a_k = np.zeros(L, dtype=np.float32)    # semi-major axis
     b_k = np.zeros(L, dtype=np.float32)    # semi-minor axis
     c_k = np.zeros(L, dtype=np.float32)    # center to focus
+    ecc_k = np.zeros(L, dtype=np.float32)  # eccentricity
+    inc_k = np.zeros(L, dtype=np.float32)  # inclination
 
     # Output Values from SGP4
     Ap_s = np.zeros(L, dtype=np.float32)   # Apogee values from SGP4
@@ -197,63 +219,43 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1):
 
         return retval
 
+    logging.info(f"  Computing Keplerian values for {L} observations")
     for i in range(L):
 
-        # === Compute the Keplerian Version ===
+        # Apogee, Perigee, and basic elliptical values
         b_k[i] = 42241.122 * n_t[i]**(-2.0/3)
         Ap_k[i] = b_k[i]*(1+ecc_t[i])-Re_avg
         Pp_k[i] = b_k[i]*(1-ecc_t[i])-Re_avg
         a_k[i] = (Ap_k[i] + Pp_k[i] + 2*Re_avg)/2
         c_k[i] = (Ap_k[i] - Pp_k[i])/2
+        ecc_k[i] = ecc_t[i] # Don't see a good way to compute this one
+        inc_k[i] = inc_t[i] # Don't see a good way to compute this one
         assert(abs(ecc_t[i] - (c_k[i]/a_k[i])) < 1e-4)
+
+        # Perturbative effects.
         drdt_k[i] = __drdt__(a_k[i], inc_t[i], ecc_t[i])
         dadt_k[i] = __dadt__(a_k[i], inc_t[i], ecc_t[i])
+
+        # Specific mechanical energy relative to escape
         v_A = (mu * (2*(Ap_k[i]+Re_avg)**-1 - a_k[i]**-1))**.5
         v_P = (mu * (2*(Pp_k[i]+Re_avg)**-1 - a_k[i]**-1))**.5
         Au_k[i] = v_A**2/2 - mu/(Ap_k[i]+Re_avg)
         Pu_k[i] = v_P**2/2 - mu/(Pp_k[i]+Re_avg)
 
 
-        # === Simulate the SGP4 version ===
+    logging.info(f"  Simulating one orbit for {L} observations")
+    for i in range(L):
 
-        # python-sgp4 representation of a satellite
-        sat = Satrec.twoline2rv(*tles[i])
-
-        # The mean motion in the sgp4 package appears to be a mean of
-        # mean-motion as days/orbit rather than orbits/day (so inverse
-        # of some averaged value from propagation of the TLE I
-        # guess???)
-        T = one_day*sat.nm
-
-        # Find the date-ranges of the simulation
-        start = E_t[i]
-        end = start + datetime.timedelta(seconds=1.1*T)
-        dt = datetime.timedelta(minutes=dt_min)
-        ts = np.arange(start, end, dt)
+        # From where do you get t(he) NERV!? From SGP4, that's where!
+        # Ba dum, CHING!!!
+        # Thank you, thank you, I'll be pelted with tomatos now.
+        t, N, e, r, v, = propagate_one_orbit(tles[i], E_t[i], dt_min)
 
         # These are the output values of interest from the
         # propagation.
-        N = len(ts)
         Rs = np.zeros(int(N))
         Vs = np.zeros(int(N))
         Us = np.zeros(int(N))
-
-        # Generate the arrays of julian dates for the propagation
-        jds = np.zeros(N, dtype=np.int)
-        frs = np.zeros(N, dtype=np.float32)
-        for j in range(N):
-            cur = ts[j].tolist()
-            jd, fr = jday(cur.year,
-                          cur.month,
-                          cur.day,
-                          cur.hour,
-                          cur.minute,
-                          cur.second)
-            jds[j] = jd
-            frs[j] = fr
-
-        # r is an array of N xyz coordinates
-        e, r, v = sat.sgp4_array(jds, frs)
 
         # Magnitudes of the radius/velocity vectors (simple 2-norm)
         R = np.sum(r**2, axis=1)**.5
@@ -261,22 +263,33 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1):
         V = np.sum(v**2, axis=1)**.5
         U = V**2/2 - mu/R # NOTE: We assume a spherical uniform Earth here
 
+        # Index into the arrays of observations where we can find the
+        # apogee and perigee.
         Aidx = np.argmax(R)
         Pidx = np.argmin(R)
 
+        # Apogee/Perigee above mean Earth radius
         Ap_s[i] = Alt[Aidx]
         Pp_s[i] = Alt[Pidx]
+
+        # Specific mechanical energy relative to escape
         Au_s[i] = U[Aidx]
         Pu_s[i] = U[Pidx]
 
+        # Elliptical parameters
         a_s[i] = (Ap_s[i] + Pp_s[i] + 2*Re_avg)/2
         c_s[i] = (Ap_s[i] - Pp_s[i])/2
         b_s[i] = (a_s[i]**2 - c_s[i]**2)**.5
         ecc_s[i] = c_s[i]/a_s[i]
         inc_s[i] = inc_t[i] # Don't see a good way to compute this one
+
+        # Perturbative effects.
         drdt_s[i] = __drdt__(a_s[i], inc_s[i], ecc_s[i])
         dadt_s[i] = __dadt__(a_s[i], inc_s[i], ecc_s[i])
 
+
+    logging.info(f"  Numerically integrating ArgP & RAAN")
+    for i in range(L):
         if 0 == i:
             raan_s[i] = raan_k[i] = raan_t[i]
             argp_s[i] = argp_k[i] = argp_t[i]
@@ -288,6 +301,14 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1):
             argp_s[i] = argp_s[i-1] + dadt_s[i] * dt
 
     def __crossings__(arr, val):
+        """Finds the locations where <arr> crosses <val>.
+
+        It'll watch for a crossing one way, then do a 180-deg flip and
+        run it again.  Because of the modulo nature of degrees, a true
+        crossing will survive this flip, whereas a false crossing
+        (from say going above 90-degrees at 359 to below 90-degrees at
+        0) will not survive this flip.
+        """
         arr = np.copy(arr)
         L = len(arr)
 
@@ -313,9 +334,17 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1):
         return retval
 
     def __interesting_crossings__(arr):
+        """Finds the interesting crossings for the given array.
+
+        These crossings are used to illustrate what is happening in
+        various plots (energy/position vs what is happening in the
+        argp).
+        """
         vals = [90, 270]
         retval = np.sort(np.concatenate([__crossings__(arr, v) for v in vals]))
         return retval
+
+    logging.info(f"  Done simulating, building plot")
 
     # Done with the propagation, let's plot the results
     fig = plt.figure(figsize=(12, 8), dpi=600)
@@ -392,9 +421,6 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1):
               'x', color='black', label='Equatorial Perigee')
 
 
-    # rck = ax_a.plot(k*raan_t, angular_t, linestyle=(0, (5, 1)), color=CA, label='RAAN (Keplerian)')
-    # rck = ax_a.plot(k*argp_t, angular_t, linestyle=(0, (5, 1)), color=CP, label='ArgP (Keplerian)')
-
     lbls = [] + ro + rcs
     rlegend = ax_a.legend(handles=lbls,
                           bbox_to_anchor=(.75, -.1, .5, 4),
@@ -417,7 +443,10 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1):
     fig.tight_layout(h_pad=2)
     fig.subplots_adjust(top=0.9)
 
-    fig.savefig(f"{des}.png")
+    logging.info(f"  Saving figure to {output}")
+    fig.savefig(output)
+    logging.info(f"  Done...Please enjoy your data.")
+    logging.info("")
 
 
 class ArgWrapper(object):
