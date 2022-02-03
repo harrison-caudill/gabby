@@ -29,6 +29,8 @@ Space-Track.org recommends finding the Apogee/Perigee of an orbit as follows:
     perigee = b*(1-ecc)-Re_max     # keplerian
     period = (MINUTES_PER_DAY / n) # keplerian
 
+I make one modification which is to use Re_avg instead.
+
 Using the observations of a single spacecraft, we compute the APT
 values using keplerian methods, and we also compute them using SGP4
 propagation and observe the difference.
@@ -161,17 +163,17 @@ def sim_apt(des, tlefile=None, dt_min=1):
         # Find the keplerian version using the space-track.org
         # recommended math.
         b_k[i] = 42241.122 * n_k[i]**(-2.0/3)
-        Ap_k[i] = b_k[i]*(1+ecc_k[i])-Re_max
-        Pp_k[i] = b_k[i]*(1-ecc_k[i])-Re_max
-        a_k[i] = (Ap_k[i] + Pp_k[i] + 2*Re_max)/2
+        Ap_k[i] = b_k[i]*(1+ecc_k[i])-Re_avg
+        Pp_k[i] = b_k[i]*(1-ecc_k[i])-Re_avg
+        a_k[i] = (Ap_k[i] + Pp_k[i] + 2*Re_avg)/2
         c_k[i] = (Ap_k[i] - Pp_k[i])/2
         assert(abs(ecc_k[i] - (c_k[i]/a_k[i])) < 1e-4)
         drdt_k[i] = __drdt__(a_k[i], inc_k[i], ecc_k[i])
         dadt_k[i] = __dadt__(a_k[i], inc_k[i], ecc_k[i])
-        v_A = (mu * (2*(Ap_k[i]+Re_max)**-1 - a_k[i]**-1))**.5
-        v_P = (mu * (2*(Pp_k[i]+Re_max)**-1 - a_k[i]**-1))**.5
-        Au_k[i] = v_A**2/2 - mu/(Ap_k[i]+Re_max)
-        Pu_k[i] = v_P**2/2 - mu/(Pp_k[i]+Re_max)
+        v_A = (mu * (2*(Ap_k[i]+Re_avg)**-1 - a_k[i]**-1))**.5
+        v_P = (mu * (2*(Pp_k[i]+Re_avg)**-1 - a_k[i]**-1))**.5
+        Au_k[i] = v_A**2/2 - mu/(Ap_k[i]+Re_avg)
+        Pu_k[i] = v_P**2/2 - mu/(Pp_k[i]+Re_avg)
 
         # === Simulate the SGP4 version ===
 
@@ -218,7 +220,7 @@ def sim_apt(des, tlefile=None, dt_min=1):
         R = np.sum(r**2, axis=1)**.5
         Alt = R - Re_avg
         V = np.sum(v**2, axis=1)**.5
-        U = V**2/2 - mu/R
+        U = V**2/2 - mu/R # NOTE: We assume a spherical uniform Earth here
 
         Aidx = np.argmax(R)
         Pidx = np.argmin(R)
