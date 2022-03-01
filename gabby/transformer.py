@@ -87,7 +87,6 @@ class MoralDecay(object):
         self.n_P_bins = len(decay_hist[0][0])
         self.n_D_bins = len(decay_hist[0][0][0])
 
-
         self.bins_Ap = np.linspace(Ap_min, Ap_max, self.n_A_bins)
         self.bins_Pp = np.linspace(Pp_min, Pp_max, self.n_P_bins)
         self.bins_Ad = np.linspace(Ad_min, Ad_max, self.n_D_bins)
@@ -253,6 +252,8 @@ class MoralDecay(object):
 
 
 class Jazz(object):
+    """Finds Moral Decay in the data.
+    """
 
     def __init__(self, cfg, global_cache=None, tgt_cache=None):
         self.cfg = cfg
@@ -280,7 +281,7 @@ class Jazz(object):
 
         Assumes samp_rate == 1 day
         """
-        k = 10000
+        k = 100000
         n_taps = 127
         fltr = np.arange(-1*(n_taps//2), n_taps//2+1, 1) * np.pi / k
         fltr = (1/k) * np.sinc(fltr)
@@ -657,13 +658,16 @@ class Jazz(object):
                 Pd_min, Pd_max, Pd_step, Pd,
                 retval[:,1:,1:,1:])
 
-    def decay_rates(self, apt, resampled, deriv):
+    def decay_rates(self, apt, resampled, deriv, drag=None):
         """Bins the decay rate distributions.
 
         retval: [A'=0,P'=1][A-bin][P-bin][D-bin] = d(A/P)/dt
 
         dt is defined in the call to derivatives() defaulting to 1 day.
         """
+
+        logging.info(f"Reticulating Splines") # Tee hee
+        #if drag: drag.normalize_decay_rates(deriv)
 
         assert(np.all(resampled.N == deriv.N))
         assert(np.all(resampled.t == deriv.t))
@@ -700,7 +704,6 @@ class Jazz(object):
          Pd_min, Pd_max, dPd, Pd,) = dig_P
 
         logging.info(f"Quantifying Moral Decay")
-
         index, univ_A, univ_P, = self.__universalize(Ap, Ad, Pp, Pd,
                                                      n_A_bins,
                                                      n_P_bins,
@@ -727,3 +730,305 @@ class Jazz(object):
         return MoralDecay(moral_decay, resampled, deriv,
                           Ap_min, Ap_max, dAp, Ad_min, Ad_max, dAd,
                           Pp_min, Pp_max, dPp, Pd_min, Pd_max, dPd)
+
+
+class SolarDrag(object):
+    """Container for historical solar-induced drag.
+
+    Mostly, we just look at global percentiles of the bstar values.
+    """
+
+    def __init__(self, t, pct, vals, mean, fenceposts, t_step):
+        """
+        t: timestamp of the beginning of the bin
+        pct: percentiles in vals (e.g. 0, .25, .5, .75, 1)
+        vals: each percentile in each time-bin
+        mean: mean for each time-bin
+        fenceposts: boundaries of the bins
+        t_step: nominal spacing between bins
+
+        Data Types:
+        t: np array of length <n-bins>
+        pct: np array of length <n-pct>
+        vals: np array of shape <n-pct> x <n-bins>
+        mean: np array of length <n-bins>
+        fenceposts: np array of length <n-bins>+1
+        t_step: float
+
+        """
+        self.t = t
+        self.pct = pct
+        self.vals = vals
+        self.mean = mean
+        self.fenceposts = fenceposts
+
+        self.t_step = t_step
+        self.n_bins = len(mean)
+        self.n_pct = len(pct)
+
+        self.bstar_factor = self.vals / np.mean(self.vals[:, 2])
+
+    def normalize_decay_rates(self, deriv):
+        """Normalizes decay rates as a function of solar activity at the time.
+
+        deriv: CloudDescriptor
+        """
+
+        logging.info(f"Normalizing Derivatives for Solar Activity")
+
+        N = math.prod(deriv.t.shape)
+        t = np.reshape(deriv.t, N)
+        A = np.reshape(deriv.A, N)
+        P = np.reshape(deriv.A, N)
+
+        # Bin numbers inside of the solar activity table
+        b = np.floor(t / self.t_step).astype(np.uint64)
+
+        # Ugh...it's super slow to do a single loop for lookups, and
+        # it's also super slow to do an np.where for each bin.  So
+        # we'll do the old combine-into-a-single-uint64 trick.  it'll
+        # be <bin-number><offset>.  Sort by bin number, replace whole
+        # ranges of the bin numbers with the right factor, then
+        # reverse the values to be <offset><factor> resort and remove
+        # the <offset>.
+
+        # Number of bits we need for the <offset>
+        n_bits = math.ceil(math.log(N+1, 2))
+
+        # Combined value of <bin-number><offset>
+        off = np.linspace(0, N-1, N, dtype=np.uint64)
+        C = b << n_bits + off
+        C = np.sort(C)
+
+        # Order in which the values appear
+        o = C & ((1<<n_bits)-1)
+
+        # Sorted bin numbers
+        b = C >> n_bits
+
+        # Locations of the first bin to have a given value
+        idx = np.searchsorted(b, np.linspace(0, self.n_bins, self.n_bins+1))
+
+        # The scaling factor as a function of bin number
+        F = 1.0 / np.clip(self.bstar_factor[:, 2], 1.0e-4, None)
+
+        # The factor to be applied, sorted by bin number
+        f = np.zeros(N, dtype=np.float64)
+        for i in range(self.n_bins):
+            f[idx[i]:idx[i+1]] = F[i]
+
+        # Recombine and sort
+        n_bits = math.ceil(math.log(np.max(F), 2))
+        C = np.sort((o << n_bits).astype(np.float64) + f)
+
+        # Grab the newly reordered values
+        f = C - (off<<n_bits)
+
+        # The scaled derivatives
+        retval_A = (A * f).reshape(deriv.A.shape)
+        retval_P = (P * f).reshape(deriv.P.shape)
+
+        # Assign the results
+        deriv.A = retval_A
+        deriv.P = retval_P
+
+    def plot_bstar(self, output, log=True):
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(1, 1, 1)
+        #if log: ax.set_yscale('log')
+        ax.set_ylabel('B*')
+        ax.set_xlabel('Date')
+        fig.suptitle('B* Variation over Time')
+        X = [ts_to_dt(x) for x in self.t]
+        for i in range(self.n_bins): assert(self.vals[i, -1])
+        #ax.plot(X, self.vals[:, 1], label='25th Pct')
+        ax.plot(X, self.vals[:, 2], label='Median')
+        #ax.plot(X, self.vals[:, 3], label='75th Pct')
+        ax.hlines(np.mean(self.vals[:, 2]), X[0], X[-1], label='Mean of the Median')
+        ax.legend()
+        fig.savefig(output)
+
+class Optimus(object):
+    """Normalizes for atmospheric density.
+
+    Space-Track.org's data is not as advertised.  They do NOT provide
+    TLEs or OMM data; they provide something close to it.  The B* drag
+    term is supposed to be a statement about the spacecraft, but is
+    instead a statement about the combination of the spacecraft and
+    the current space weather.  It makes some amount of sense that
+    they'd combine the numbers in this fashion since the TLE format
+    does not include a term for space weather otherwise.
+
+    The Optimus class exists to first find the mean B* value as a
+    function of time, and then to normalize the B* values against that
+    mean.
+    """
+
+    def __init__(self, base, cache, db):
+        self.base = base
+        self.fragments = db.find_daughter_fragments(base)
+        self.cache = cache
+        self.db = db
+
+    def _load_bstar(self, cache=True):
+        logging.info(f"Finding B* History")
+
+        txn = self.db.txn(write=False)
+        cursor = txn.cursor(db=self.db.db_tle)
+        cursor.first()
+
+        M = 1024
+        N = 0
+        B = np.zeros(M, dtype=np.float32)
+        T = np.zeros(M, dtype=np.int)
+
+
+        b_name = f"bstar-raw-B"
+        t_name = f"bstar-raw-T"
+        if cache and b_name in self.cache:
+            B = self.cache[b_name]
+            T = self.cache[t_name]
+
+        else:
+            # Gather all of the bstar values
+            for k, v in cursor:
+                b = unpack_tle(v)[TLE_OFF_BSTAR]
+                T[N] = parse_key(k)[1]
+                B[N] = b
+                N += 1
+                if N >= M:
+                    M *= 2
+                    B.resize(M)
+                    T.resize(M)
+
+                if 0 == N % 1e6:
+                    logging.info(f"  Loaded {int(N/1e6)} M B* entries")
+
+            B = B[:N]
+            T = T[:N]
+
+            if cache:
+                self.cache[b_name] = B
+                self.cache[t_name] = T
+
+        return B, T
+
+    def bstar_percentiles(self,
+                          dt_days=10,
+                          pct=[0, .25, .5, .75, 1],
+                          cache=True):
+        """Finds the percentiles for bstar values for all TLEs available.
+
+        We aren't actually finding the mean, because it's a massively
+        skewed sample.  However, for the purpose of a first-order
+        approximation, it should be fine.  We'll literally just add up
+        all the bstar values and divide by N for each time bucket.
+        """
+
+        name = f"solar-drag-{dt_days}"
+        if cache and name in self.cache: return self.cache[name]
+
+        pct = np.array(pct, dtype=np.float32)
+
+        d, t, B = self.db.cache_tle_field(TLE_OFF_BSTAR)
+
+        # # Remove any 0/negative values of B* as they aren't useful here
+        # mask = np.where(B <= 0, 0, 1)
+        # t *= mask
+        # B *= mask
+        # B = (B[B != 0]).astype(np.float64)
+        # t = (t[t != 0]).astype(np.uint64)
+        N = len(B)
+
+        # We need the min and max for a number of reasons
+        t_min = np.min(t)
+        t_max = np.max(t)
+        t -= t_min
+
+        # Sort the B* values
+        logging.info("  Sorting B* Values")
+        s = np.sum(B)
+
+        # Bits used by timestamps
+        t_bits = math.ceil(math.log(np.max(t)+1, 2))
+
+        # Bits that will be used by the B* values
+        B_bits = 64 - t_bits
+
+        # Max value
+        B_max = (1 << B_bits) - 1
+
+        # Occupied range of B* values
+        B_used = np.max(B) - np.min(B)
+
+        # Since we're quantizing the value of B*, let's find our
+        # quantizer value
+        B_states = B_max + 1
+        B_quant = B_used / B_states
+
+        # Additive factor to B
+        B_off = np.min(B)
+
+        # Multiplicative factor
+        B_factor = float(B_max) / B_used
+
+        # Combine and sort
+        C = np.sort((t<<B_bits).astype(np.uint64)
+                    + (B_factor*(B+B_off)).astype(np.uint64))
+
+        # Reconstruct
+        t = (C >> B_bits)
+        B = ((C - (t << B_bits)).astype(np.float64) / B_factor) - B_off
+        t += t_min
+
+        ### t/B are now sorted in temporal order
+
+        # Enumerate our fence posts/bins.  There will be N+1 fence
+        # posts for N buckets.
+        t_step = datetime.timedelta(days=dt_days).total_seconds()
+        n_bins = math.ceil((t_max - t_min) / t_step)
+        print(f"n_bins: {n_bins}")
+        print(f"t_min:  {t_min}")
+        print(f"t_max:  {t_max}")
+        print(f"t_step: {t_step}")
+        fenceposts = np.linspace(t_min, t_max, n_bins+1, dtype=np.float64)
+        bins = fenceposts[:-1]
+
+        # Index the sorted array
+        logging.info(f"Indexing bin locations in times")
+        idx = np.searchsorted(t, fenceposts)
+        print(len(idx))
+        print(len(fenceposts))
+        print(n_bins)
+        assert(len(idx) == len(fenceposts) == n_bins+1)
+
+        # Number of percentile values being observed
+        n_pct = len(pct)
+
+        # Output values
+        vals = np.zeros((n_bins, len(pct)), dtype=np.float32)
+        mean = np.zeros(n_bins, dtype=np.float32)
+
+        logging.info(f"Binning Data")
+        t = np.sort(t)
+        for i in range(n_bins):
+            logging.info(f"  Binning {i+1}/{n_bins}")
+            a = idx[i]
+            b = idx[i+1]
+            tmp = B[a:b]
+            L = len(tmp) - 1 # We subtract 1 so that 1*L is the last entry
+            for j in range(n_pct):
+                if 0 >= L:
+                    vals[i][j] = 0
+                    mean[i] = 0
+                else:
+                    k = int(L*pct[j])
+                    vals[i][j] = np.partition(tmp, k)[k]
+            mean[i] = np.mean(tmp)
+        logging.info(f"  Done Binning Data")
+
+        retval = SolarDrag(t, pct, vals, mean, fenceposts, t_step)
+
+        self.cache[name] = retval
+
+        return retval

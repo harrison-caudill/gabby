@@ -73,20 +73,25 @@ class GabbyCache(object):
         os.mkdir(self._cache_path(name))
 
 
-        mappings = {}
-        attrs = vars(obj)
-        keys = []
         with open(self._data_path(name), 'wb') as fd:
-            for k in attrs:
-                if isinstance(attrs[k], np.ndarray):
-                    keys.append(k)
-                    mappings[k] = getattr(obj, k)
-                    np.save(fd, mappings[k])
-                    setattr(obj, k, None)
+            keys = []
+            mappings = {}
+            if isinstance(obj, np.ndarray):
+                np.save(fd, obj)
+                keys.append(None) # None signifies a top-level array
+            else:
+                attrs = vars(obj)
+                for k in attrs:
+                    if isinstance(attrs[k], np.ndarray):
+                        keys.append(k)
+                        mappings[k] = getattr(obj, k)
+                        np.save(fd, mappings[k])
+                        setattr(obj, k, None)
 
-        for k in mappings: setattr(obj, k, mappings[k])
+                for k in mappings: setattr(obj, k, mappings[k])
 
-        ent = GabbyCacheEntry(name, obj, keys)
+            ent = GabbyCacheEntry(name, obj, keys)
+
         with open(self._ent_path(name), 'wb') as fd: pickle.dump(ent, fd)
 
         return True
@@ -106,6 +111,9 @@ class GabbyCache(object):
 
         with open(self._data_path(name), 'rb') as fd:
             for key in ent.keys:
+                if key is None:
+                    # None means that it's a top-level numpy array
+                    return np.load(fd)
                 setattr(ent.obj, key, np.load(fd))
 
         return ent.obj

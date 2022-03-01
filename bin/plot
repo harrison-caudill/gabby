@@ -240,20 +240,25 @@ if __name__ == '__main__':
         if tgt.getboolean('fwd-prop'):
             logging.info(f"  Forward propagation requested")
 
+            prime = gabby.Optimus(base=['99025'], cache=global_cache, db=db)
+            drag = prime.bstar_percentiles()
+
             prop = gabby.StatsPropagator(tgt=tgt,
                                          cfg=cfg,
                                          global_cache=global_cache,
-                                         db=db)
+                                         db=db,
+                                         drag=drag)
+
             prop.propagate(data)
 
-        plotter = gabby.GabbyPlotter(cfg=cfg['general'],
-                                     tgt=tgt,
-                                     cache_dir=tgt_cache_dir,
-                                     img_dir=img_dir,
-                                     output_dir=output_dir,
-                                     data=data,
-                                     db=db)
-        plotter.plot(n_threads=args.n_threads)
+            plotter = gabby.GabbyPlotter(cfg=cfg['general'],
+                                         tgt=tgt,
+                                         cache_dir=tgt_cache_dir,
+                                         img_dir=img_dir,
+                                         output_dir=output_dir,
+                                         data=data,
+                                         db=db)
+            plotter.plot(n_threads=args.n_threads)
 
     # elif args.plot_type == 'bstar':
     #     plotter = gabby.BStarPlotter(cfg=cfg['general'],

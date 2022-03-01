@@ -242,6 +242,116 @@ class GabbyDB(object):
         """
         return self._load_data(fragments, txn=txn, cache=cache, apt=True)
 
+    def apt_cache_names(self):
+        return dict([(l, f"apt-raw-{l}") for l in 'dtAPT'])
+
+    def tle_cache_names(self, field_off):
+        fields = ['n',
+                 'ndot',
+                 'nddot',
+                 'bstar',
+                 'tle_num',
+                 'inc',
+                 'raan',
+                 'ecc',
+                 'argp',
+                 'mean_anomaly',
+                 'rev_num',
+                 'N',]
+        return f"tle-raw-d", f"tle-raw-t", f"tle-raw-{fields[field_off]}"
+
+    def cache_apt(self, txn=None, force=False):
+        # Initialize our main cursor
+        commit, txn = self._txn(txn)
+        cursor = txn.cursor(db=self.db_apt)
+
+        cursor.first()
+
+        logging.info(f"Loading/Caching APT in numpy arrays")
+
+        names = self.apt_cache_names()
+        if names['d'] in self.global_cache:
+            if force:
+                logging.info(f"  Overwriting cached values")
+            else:
+                logging.info(f"  APT already in cache")
+                return [self.global_cache[n] for n in names]
+
+        N = 0
+        M = 1024
+        d = np.array(['' for i in range(M)], dtype='<U8')
+        t = np.zeros(M, dtype=np.int)
+        A = np.zeros(M, dtype=np.float32)
+        P = np.zeros(M, dtype=np.float32)
+        T = np.zeros(M, dtype=np.float32)
+
+        for k, v in cursor:
+            d[N], t[N] = parse_key(k)
+            A[N], P[N], T[N] = unpack_apt(v)
+            N += 1
+            if 0 == N % 1e6:
+                logging.info(f"Retreived {N} records")
+            if N >= M:
+                assert(N == M)
+                M <<= 1
+                d.resize(M)
+                t.resize(M)
+                A.resize(M)
+                P.resize(M)
+                T.resize(M)
+
+        self.global_cache[names['d']] = d
+        self.global_cache[names['t']] = t
+        self.global_cache[names['A']] = A
+        self.global_cache[names['P']] = P
+        self.global_cache[names['T']] = T
+        return [d, t, A, P, T,]
+
+    def cache_tle_field(self, field_off, txn=None, force=False):
+
+        # Initialize our main cursor
+        commit, txn = self._txn(txn)
+        cursor = txn.cursor(db=self.db_tle)
+
+        cursor.first()
+
+        logging.info(f"Loading/Caching TLE in numpy arrays")
+
+        d_name, t_name, v_name = self.tle_cache_names(field_off)
+        if v_name in self.global_cache:
+            if force:
+                logging.info(f"  Overwriting cached values")
+            else:
+                logging.info(f"  TLE field already in cache")
+                return [self.global_cache[d_name],
+                        self.global_cache[t_name],
+                        self.global_cache[v_name],]
+
+        N = 0
+        M = 1024
+        d = np.array(['' for i in range(M)], dtype='<U8')
+        t = np.zeros(M, dtype=np.uint32)
+        V = np.zeros(M, dtype=np.float32)
+
+        name = self.tle_cache_names(field_off)
+
+        for k, v in cursor:
+            d[N], t[N] = parse_key(k)
+            V[N] = unpack_tle(v)[field_off]
+            N += 1
+            if 0 == N % 1e6:
+                logging.info(f"Retreived {N} records")
+            if N >= M:
+                assert(N == M)
+                M <<= 1
+                d.resize(M)
+                t.resize(M)
+                V.resize(M)
+
+        self.global_cache[d_name] = d
+        self.global_cache[t_name] = t
+        self.global_cache[v_name] = V
+
     def _load_single_fragment(self, des, cursor, n_fields, apt=True):
         # Number of observations for this fragment
         n = 0
@@ -253,7 +363,7 @@ class GabbyDB(object):
 
         # Stash the current round here
         M = 1024
-        t = np.zeros(M, dtype=np.int)
+        t = np.zeros(M, dtype=np.uint32)
 
         cur = [np.zeros(M, dtype=np.float32) for i in range(n_fields)]
 
@@ -262,18 +372,17 @@ class GabbyDB(object):
         if n_fields == 3:
             for k, v in cursor:
                 if not k.startswith(prefix): break
-
                 (cur[0][i],
                  cur[1][i],
                  cur[2][i],) = struct.unpack(APT_STRUCT_FMT, v)
                 t[i] = int(k[off:])
                 i += 1
 
-            # We may need to expand our arrays
-            if i >= M:
-                M *= 2
-                t.resize(M)
-                for j in range(n_fields): cur[i].resize(M)
+                # We may need to expand our arrays
+                if i >= M:
+                    M *= 2
+                    t.resize(M)
+                    for j in range(n_fields): cur[j].resize(M)
 
         else:
             for k, v in cursor:
@@ -292,11 +401,11 @@ class GabbyDB(object):
                 t[i] = int(k[off:])
                 i += 1
 
-            # We may need to expand our arrays
-            if i >= M:
-                M *= 2
-                t.resize(M)
-                for j in range(n_fields): cur[i].resize(M)
+                # We may need to expand our arrays
+                if i >= M:
+                    M *= 2
+                    t.resize(M)
+                    for j in range(n_fields): cur[j].resize(M)
 
         return t, cur, i
 
@@ -317,7 +426,7 @@ class GabbyDB(object):
         if self.global_cache and cache:
             if cache_name in self.global_cache:
                 logging.info(f"  Loading data from cache")
-                return self.global_cache[name]
+                return self.global_cache[cache_name]
 
         # Initialize our main cursor
         commit, txn = self._txn(txn)
@@ -334,7 +443,7 @@ class GabbyDB(object):
         v_s = [[] for i in range(n_fields)]
 
         # Number of entries per fragment: L values
-        N_s = np.zeros(L, dtype=np.int)
+        N_s = np.zeros(L, dtype=np.uint32)
 
         # Load the individual fragments
         for i in range(L):
@@ -345,6 +454,9 @@ class GabbyDB(object):
             N_s[i] = n
             for j in range(n_fields): v_s[j].append(v[j])
             del v # decrement refcount for numpy resize
+
+            if i and 0 == i % 1000:
+                logging.info(f"  Loaded {i} fragments")
 
         # Find our global N rounded to the nearest power of 2
         N = np.max(N_s)
@@ -384,7 +496,7 @@ class GabbyDB(object):
                                      mean_anomaly=V[TLE_OFF_MEAN_ANOMALY],
                                      rev_num=V[TLE_OFF_REV_NUM],)
 
-        if self.global_cache and not skip_cache:
+        if self.global_cache and cache:
             logging.info("  Saving results to cache")
             self.global_cache[cache_name] = retval
 

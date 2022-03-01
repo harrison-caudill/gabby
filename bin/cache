@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+
+import argparse
+import logging
+import os
+import sys
+
+import gabby
+
+
+if __name__ == '__main__':
+    desc = """Fetches data from the DB and stasheds it in the gabby cache.
+
+    Loading a numpy serialized array of raw data is HELLA fast
+    compared to using lmdb.  LMDB is good for smaller transactions and
+    as a good on-disk format, but when you want to loop through a
+    hundred million items, it's kinda slow.  Since most of the
+    parallelized operations will happen in numpy anyway, might as well
+    just start there.  Gathering global statistics on things involves,
+    well, the global set of information.
+    """
+
+    formatter = argparse.RawTextHelpFormatter
+    parser = argparse.ArgumentParser(description=desc,
+                                     formatter_class=formatter)
+
+    parser.add_argument('--db-path', '-d',
+                        metavar='DB_PATH',
+                        action='store',
+                        dest='db_path',
+                        required=False,
+                        type=str,
+                        default='output/tle.db',
+                        help='Location of the tle lmdb (%(default)s)')
+
+    parser.add_argument('--global-cache-path',
+                        metavar='GLOBAL_CACHE_DIR',
+                        action='store',
+                        dest='global_cache_dir',
+                        required=False,
+                        type=str,
+                        default='%(output_dir)s/cache',
+                        help='Cache directory (%(default)s)')
+
+    parser.add_argument('--output-directory', '-o',
+                        metavar='OUTPUT_DIR',
+                        action='store',
+                        dest='output_dir',
+                        required=False,
+                        type=str,
+                        default='output',
+                        help='Output directory (%(default)s)',)
+
+    parser.add_argument('--cache-apt', '-a',
+                        action='store_true',
+                        dest='cache_apt',
+                        help='Cache APT',)
+
+    parser.add_argument('--force', '-f',
+                        action='store_true',
+                        dest='force',
+                        help='Force overwrite',)
+
+    parser.add_argument('--cache-tle-bstar', '-b',
+                        action='store_true',
+                        dest='cache_bstar',
+                        help='Cache B* from the TLE',)
+
+    parser.add_argument('--log-file', '-l',
+                        metavar='LOG_FILE',
+                        action='store',
+                        dest='log_file',
+                        type=str,
+                        default='%(output_dir)s/build_cache.log',
+                        help='Logfile in output directory (%(default)s)')
+
+    parser.add_argument('--log-level', '-L',
+                        metavar='LOG_LEVEL',
+                        action='store',
+                        dest='log_level',
+                        type=str,
+                        default='info',
+                        choices=['critical',
+                                 'error',
+                                 'warning',
+                                 'info',
+                                 'debug'],
+                        help='Log level to use (%(default)s)')
+
+    parser.add_argument('tle_path',
+                        metavar='TLE_PATH',
+                        nargs='?',
+                        action='store',
+                        type=str,
+                        help='File to snarf in')
+
+    args = parser.parse_args()
+
+
+    arg_dict = {
+        }
+
+    # Get our output directory all set up
+    output_dir = args.output_dir % arg_dict
+    arg_dict['output_dir'] = output_dir
+    gabby.mkdir_p(output_dir)
+
+    # Get set up to log
+    log_file = args.log_file%arg_dict
+    gabby.setup_logging(log_file=log_file,
+                        log_level=args.log_level)
+    logging.info(f"Giddy up, Gabby!")
+
+    db_path = args.db_path % arg_dict
+    global_cache_dir = args.global_cache_dir % arg_dict
+    cache = gabby.GabbyCache(global_cache_dir)
+    db = gabby.GabbyDB(db_path, global_cache=cache)
+
+    logging.info("Caching some fields")
+
+    if args.cache_apt: db.cache_apt(force=args.force)
+    if args.cache_bstar: db.cache_tle_field(gabby.TLE_OFF_BSTAR,
+                                            force=args.force)

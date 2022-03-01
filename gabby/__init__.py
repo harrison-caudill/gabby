@@ -6,6 +6,7 @@ from .gabby_plotter import GabbyDataModel
 from .bstar_plotter import BStarPlotter
 from .cache import GabbyCache
 from .transformer import Jazz
+from .transformer import Optimus
 from .tle import TLE
 from .db import GabbyDB
 from .faker import FakeDB

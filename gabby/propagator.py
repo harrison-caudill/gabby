@@ -45,12 +45,14 @@ class StatsPropagator(object):
                  tgt_cache=None,
                  db=None,
                  cfg=None,
-                 tgt=None):
+                 tgt=None,
+                 drag=None):
         self.global_cache = global_cache
         self.tgt_cache = tgt_cache
         self.db = db
         self.cfg = cfg
         self.tgt = tgt
+        self.drag = drag
         self._init_global_stats()
 
     def _cfg_hash(self, cfg):
@@ -126,7 +128,8 @@ class StatsPropagator(object):
             filtered.plot('output/filtered.png', idx, title=f"filtered {deriv.fragments[idx]}")
             deriv.plot('output/deriv.png', idx, title=f"derivative {deriv.fragments[idx]}")
 
-            self.decay = decay = jazz.decay_rates(apt, filtered, deriv)
+            self.decay = decay = jazz.decay_rates(apt, filtered, deriv,
+                                                  drag=self.drag)
 
             logging.info(f"  Adding a little moral decay to the cache")
             self.global_cache[decay_name] = decay
@@ -148,24 +151,27 @@ class StatsPropagator(object):
 
         decay_alt = self.tgt.getint('decay-altitude')
 
+        for i in range(L):
+            data.scope_start[data.names[i]] = data.start_ts
+
+        t = data.start_ts
         for i in range(N-1):
             for j in range(L):
+                frag = data.names[j]
                 A = data.As[i][j]
                 P = data.Ps[i][j]
                 if A and not data.As[i+1][j]:
                     assert(A > P)
-                    if P <= decay_alt: continue
+                    if P <= decay_alt:
+                        data.scope_end[frag] = t
+                        data.valid[i+1][j] = 0
+                        continue
 
                     # predict the next value
-                    assert(dt)
                     idx_A = int((A - self.decay.Ap_min) / self.decay.dAp)
                     idx_P = int((P - self.decay.Pp_min) / self.decay.dPp)
                     rate_A = self.decay.median[0][idx_A][idx_P]
                     rate_P = self.decay.median[1][idx_A][idx_P]
-                    if not rate_A:
-                        print(self.decay.median[0])
-                        print(idx_A, A, rate_A)
-                        print(idx_P, P, rate_P)
                     assert(rate_A)
                     delta_A = dt * rate_A
                     delta_P = dt * rate_P
@@ -175,10 +181,11 @@ class StatsPropagator(object):
                     data.valid[i+1][j] = 1
                     assert(data.As[i+1][j])
                     assert(data.As[i+1][j] != A)
+            t += dt
 
-        # Update the scope table so we actually plot things
-        for frag in data.names:
-            data.scope_end[frag] = data.end_ts
+        # Update the number of valid values
+        data.Ns = np.sum(data.valid, axis=1, dtype=np.int64)
+
 
 def keplerian_period(A, P):
     """Determines the period of a keplerian ellipitical earth orbit.
