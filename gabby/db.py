@@ -352,6 +352,8 @@ class GabbyDB(object):
         self.global_cache[t_name] = t
         self.global_cache[v_name] = V
 
+        return d, t, V
+
     def _load_single_fragment(self, des, cursor, n_fields, apt=True):
         # Number of observations for this fragment
         n = 0
