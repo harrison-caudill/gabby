@@ -20,7 +20,11 @@ import sys
 Re_max = 6378 # km
 Re_avg = 6371 # km
 Me = 5.972e24 # kg
-J2e = 1.7553e10 # km^5/s^2
+J2e =  1.7553e10 # km^5/s^2
+
+#https://articles.adsabs.harvard.edu/cgi-bin/nph-iarticle_query?1964PASJ...16..263K&defaultprint=YES&filetype=.pdf
+J4e = -1.65597e-6
+
 G = 6.6743e-20 # km^3 / kg / s
 mu = 3.986004418e5 # km^3 / s^2
 one_day = datetime.timedelta(days=1).total_seconds()
@@ -120,6 +124,17 @@ def propagate_one_orbit(tle, epoch, dt_min):
     e, r, v = sat.sgp4_array(jds, frs)
 
     return ts, N, e, r, v
+
+
+def moon_2008():
+    # Full Moons
+    full = datetime.datetime(2008, 1, 22, 13, 35, 0)
+    T_moon = datetime.timedelta(days=29.5)
+    E_moon = []
+    while(full < datetime.datetime(2009, 1, 1)):
+        E_moon.append(full)
+        full += T_moon
+    return E_moon
 
 
 def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
@@ -267,6 +282,7 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
         # https://en.wikipedia.org/wiki/Geopotential_model eq 10(.5)
         z = np.array([r[j][-1] for j in range(N)])
         J2_term = J2e * R**-5 * 0.5 * (3*z**2 - R**2)
+        J4_term = J4e
         U = (V**2/2        # Kinetic Energy
              + -1.0 * mu/R # Standard Gravitational Potential Energy
              + J2_term)    # Modification for J2
@@ -354,6 +370,8 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
 
     logging.info(f"  Done simulating, building plot")
 
+    E_moon = moon_2008()
+
     # Done with the propagation, let's plot the results
     fig = plt.figure(figsize=(12, 8), dpi=600)
 
@@ -379,6 +397,13 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
               [Pp_s[i] for i in crossings],
               'x', color='black', label='Equatorial Perigee')
 
+    # lbls += ax_p.plot(E_moon,
+    #                   [Pp_s[np.searchsorted(E_t, e)] for e in E_moon],
+    #                   '.', color='black', label='Full Moon')
+    # ax_p.plot(E_moon,
+    #           [Ap_s[np.searchsorted(E_t, e)] for e in E_moon],
+    #           '.', color='black', label='Full Moon')
+
     ax_p.legend(lbls, [l.get_label() for l in lbls],
                 bbox_to_anchor=(.75, .35, .2, 4),
                 loc='lower left',
@@ -392,7 +417,7 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
     ax_e.plot(E_t, Au_k, '-', color=CA, label='Energy at Apogee (TLE)')
     ax_e.plot(E_t, Pu_s, '--', color=CP, label='Energy at Perigee (SGP4)')
     ax_e.plot(E_t, Pu_k, '-', color=CP, label='Energy at Perigee (TLE)')
-    ax_e.legend(bbox_to_anchor=(0, 1, 1, 4),
+    ax_e.legend(bbox_to_anchor=(0, 1.05, 1, 4),
                 loc='lower left',
                 ncol=2,
                 mode="expand",
@@ -400,9 +425,15 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
     ax_e.plot([E_t[i] for i in crossings],
               [Au_s[i] for i in crossings],
               'x', color='black', label='Crossing')
+    # ax_e.plot(E_moon,
+    #           [Au_s[np.searchsorted(E_t, e)] for e in E_moon],
+    #           '.', color='black', label='Full Moon')
     ax_e.plot([E_t[i] for i in crossings],
               [Pu_s[i] for i in crossings],
               'x', color='black', label='Equatorial Perigee')
+    # ax_e.plot(E_moon,
+    #           [Pu_s[np.searchsorted(E_t, e)] for e in E_moon],
+    #           '.', color='black', label='Full Moon')
 
     ax_e.set_xlabel("Observation Date")
     ax_e.set_ylabel("Specific Mechanical Energy (MJ/kg)")
@@ -421,8 +452,8 @@ def cmd_sim_apt(des, tlefile=None, dt_min=1, output=None):
     ro = ax_a.plot(k*raan_t, angular_t, '-', color=CA, label='RAAN (obs)')
     ao = ax_a.plot(k*argp_t, angular_t, '-', color=CP, label='ArgP (obs)')
 
-    rcs = ax_a.plot(k*raan_s, angular_t, '--', color=CA, label='RAAN (SGP4)')
-    acs = ax_a.plot(k*argp_s, angular_t, '--', color=CP, label='ArgP (SGP4)')
+    rcs = ax_a.plot(k*raan_s, angular_t, '--', color=CA, label='RAAN (int)')
+    acs = ax_a.plot(k*argp_s, angular_t, '--', color=CP, label='ArgP (int)')
 
     ax_a.plot([k*argp_t[i] for i in crossings],
               [angular_t[i] for i in crossings],
@@ -495,14 +526,36 @@ def cmd_tle_var(des, tlefile=None, dt_min=1, output=None):
      inc_t,   # inclination                       
      ) = snarf_tles(tlefile)
 
-    b = 42241.122 * n_t**(-2.0/3)
+    ts = np.array([e.timestamp() for e in E_t])
+    coef = np.polyfit(ts, 86400 / n_t, deg=1)
+    ts -= ts[0]
+    meaner = ts * coef[0] + coef[1]
+    n = n_t - meaner
+
+    dt = datetime.timedelta(days=5)
+    E_moon = moon_2008()
+    for i in range(len(E_moon)):
+        E = E_moon[i]
+        idx = np.searchsorted(E_t, E)
+        raan = raan_t[idx]
+        M = 5
+        days = M * np.cos(raan_t[idx] * np.pi/180) + M
+        days = 4
+        days = M * raan/360.0
+        dt = datetime.timedelta(days=days)
+        E_moon[i] += dt
 
     fig = plt.figure(figsize=(12, 8), dpi=600)
     ax_argp = fig.add_subplot(1, 1, 1)
-    ax_argp.plot(E_t, argp_t, label='ArgP')
+    ax_argp.plot(E_t, raan_t, label='ArgP')
 
     ax_ecc = ax_argp.twinx()
-    ax_ecc.plot(E_t, b, label='Eccentricity')
+    ax_ecc.plot(E_t, n, label='Eccentricity')
+
+    ax_ecc.plot(E_moon,
+                [n[np.searchsorted(E_t, e)] for e in E_moon],
+                '.', color='black', label='Full Moon')
+
     fig.savefig(output)
 
 

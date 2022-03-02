@@ -45,6 +45,7 @@ class GabbyDataModel(DataModel):
         # Pull in the time boundaries from the config file
         self.start_d = parse_date_d(self.tgt['start-date'])
         self.end_d = parse_date_d(self.tgt['end-date'])
+        self.incident_d = parse_date_d(self.tgt['incident'])
 
         # Time step between images
         self.dt = datetime.timedelta(days=self.tgt.getint('plot-period'))
@@ -61,7 +62,7 @@ class GabbyDataModel(DataModel):
         fragments = [f for f in fragments if f not in self.mask]
 
         # SENILE
-        fragments = fragments[:10]
+        #fragments = fragments[19:20]
         self.names = fragments
 
         apt = self.apt = db.load_apt(fragments)
@@ -79,6 +80,7 @@ class GabbyDataModel(DataModel):
 
         # Get the integer timestamps to use for indexing
         self.start_ts = start_ts = dt_to_ts(self.start_d)
+        self.incident_ts = incident_ts = dt_to_ts(self.incident_d)
         self.end_ts = end_ts = dt_to_ts(self.end_d)
         dt_s = int(self.dt.total_seconds())
         timestamps = np.arange(start_ts, end_ts+dt_s, dt_s, dtype=np.int)
@@ -100,6 +102,8 @@ class GabbyDataModel(DataModel):
 
         valid = np.zeros((N, L), dtype=np.int8)
 
+        idx = np.searchsorted(t, timestamps)
+
         # The big main loop
         j = 0
         for i in range(L):
@@ -113,7 +117,7 @@ class GabbyDataModel(DataModel):
                 tgt_ts = timestamps[j]
                 if tgt_ts > self.scope_end[frag]: break
 
-                next_idx = np.searchsorted(t, tgt_ts)
+                next_idx = idx[j]
                 next_ts = apt.t[i][next_idx]
                 next_A = apt.A[i][next_idx]
                 next_P = apt.P[i][next_idx]

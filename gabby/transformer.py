@@ -667,7 +667,7 @@ class Jazz(object):
         """
 
         logging.info(f"Reticulating Splines") # Tee hee
-        #if drag: drag.normalize_decay_rates(deriv)
+        if drag: drag.normalize_decay_rates(deriv)
 
         assert(np.all(resampled.N == deriv.N))
         assert(np.all(resampled.t == deriv.t))

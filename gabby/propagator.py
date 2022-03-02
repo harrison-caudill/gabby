@@ -151,40 +151,72 @@ class StatsPropagator(object):
 
         decay_alt = self.tgt.getint('decay-altitude')
 
-        for i in range(L):
-            data.scope_start[data.names[i]] = data.start_ts
+        if rev:
+            # If we're doing reverse propagation then we assume that
+            # all of the fragments come into scope at the time of the
+            # incident.
+            for i in range(L):
+                data.scope_start[data.names[i]] = data.incident_ts
 
+        # The beginning is a good place to begin
         t = data.start_ts
+
+        # Forward pass
         for i in range(N-1):
             for j in range(L):
                 frag = data.names[j]
                 A = data.As[i][j]
                 P = data.Ps[i][j]
-                if A and not data.As[i+1][j]:
-                    assert(A > P)
-                    if P <= decay_alt:
-                        data.scope_end[frag] = t
-                        data.valid[i+1][j] = 0
-                        continue
+                assert(A >= P)
 
-                    # predict the next value
-                    idx_A = int((A - self.decay.Ap_min) / self.decay.dAp)
-                    idx_P = int((P - self.decay.Pp_min) / self.decay.dPp)
-                    rate_A = self.decay.median[0][idx_A][idx_P]
-                    rate_P = self.decay.median[1][idx_A][idx_P]
-                    assert(rate_A)
-                    delta_A = dt * rate_A
-                    delta_P = dt * rate_P
-                    data.As[i+1][j] = A - delta_A
-                    data.Ps[i+1][j] = P - delta_P
-                    data.Ts[i+1][j] = keplerian_period(data.As[i+1][j], data.Ps[i+1][j])
-                    data.valid[i+1][j] = 1
-                    assert(data.As[i+1][j])
-                    assert(data.As[i+1][j] != A)
-            t += dt
 
-        # Update the number of valid values
-        data.Ns = np.sum(data.valid, axis=1, dtype=np.int64)
+        #         if A < P:
+        #             print(i, j)
+        #             assert(A >= P)
+        #         if A and not data.As[i+1][j]:
+        #             if P <= decay_alt:
+        #                 data.scope_end[frag] = t
+        #                 data.valid[i+1][j] = 0
+        #                 continue
+
+        #             # predict the next value
+        #             idx_A = int((A - self.decay.Ap_min) / self.decay.dAp)
+        #             idx_P = int((P - self.decay.Pp_min) / self.decay.dPp)
+
+        #             if idx_A >= self.decay.n_A_bins or \
+        #                idx_P >= self.decay.n_P_bins:
+        #                 data.scope_end[frag] = t
+        #                 data.valid[i+1][j] = 0
+        #                 continue
+
+        #             rate_A = self.decay.median[0][idx_A][idx_P]
+        #             rate_P = self.decay.median[1][idx_A][idx_P]
+
+        #             # SENILE
+        #             # if not rate_A
+        #             #     rate_A = self.decay.median[0][idx_A][idx_P]
+        #             if not rate_A:
+        #                 data.scope_end[frag] = t
+        #                 data.valid[i+1][j] = 0
+        #                 continue
+
+        #             delta_A = dt * rate_A
+        #             delta_P = dt * rate_P
+        #             A = A - delta_A
+        #             P = P - delta_P
+        #             if A > P:
+        #                 data.As[i+1][j] = A
+        #                 data.Ps[i+1][j] = P
+        #             else:
+        #                 data.As[i+1][j] = P
+        #                 data.Ps[i+1][j] = A
+        #             data.Ts[i+1][j] = keplerian_period(data.As[i+1][j], data.Ps[i+1][j])
+        #             data.valid[i+1][j] = 1
+        #         assert(data.As[i+1][j] >= data.Ps[i+1][j])
+        #     t += dt
+
+        # # Update the number of valid values
+        # data.Ns = np.sum(data.valid, axis=1, dtype=np.int64)
 
 
 def keplerian_period(A, P):

@@ -248,7 +248,6 @@ if __name__ == '__main__':
                                          global_cache=global_cache,
                                          db=db,
                                          drag=drag)
-
             prop.propagate(data)
 
             plotter = gabby.GabbyPlotter(cfg=cfg['general'],
