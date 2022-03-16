@@ -10,7 +10,7 @@ import sys
 
 from .fixtures import *
 from ..utils import *
-from ..gabby_plotter import GabbyDataModel
+from ..gabby_data_model import GabbyDataModel
 from ..gabby_plotter import GabbyPlotter
 
 class TestGabbyDataModel(object):
@@ -81,3 +81,23 @@ class TestGabbyDataModel(object):
         # p.plot()
 
         pass
+
+    def test_fetch_from_db(self, cfg):
+        db = FakeDB(cfg, cfg['db-gabby-plot-load-from-db'])
+        db.build_manual()
+        data = GabbyDataModel(cfg['gabby-test-model'])
+        data.fetch_from_db(db.db)
+
+        assert(np.all(data.As == [[450,   0,   0],
+                                  [450, 425,   0],
+                                  [450, 375,   0],
+                                  [  0,   0,   0]]))
+        assert(np.all(data.Ps == [[425,   0,   0],
+                                  [425, 325,   0],
+                                  [425, 275,   0],
+                                  [  0,   0,   0]]))
+
+        assert(np.all(data.valid == [[1, 0, 0],
+                                     [1, 1, 0],
+                                     [1, 1, 0],
+                                     [0, 0, 0]]))
