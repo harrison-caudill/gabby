@@ -201,17 +201,27 @@ class StatsPropagator(object):
                         # swap it round.  This issue will be fixed
                         # when we switch to a history-informed
                         # physical model in the non-descript future.
-                        rate_A = self.decay.median[1][idx_A][idx_P]
-                        rate_P = self.decay.median[0][idx_A][idx_P]
+                        tmp = rate_P
+                        rate_P = rate_A
+                        rate_A = tmp
 
-                    # Put the neew values in the next time-bin
-                    data.As[i+1][j] = A + dt * rate_A
-                    data.Ps[i+1][j] = P + dt * rate_P
+                    # Compute the new A/P values
+                    A = A + dt * rate_A
+                    P = P + dt * rate_P
+
+                    # Because the apogee decay right is higher we can
+                    # sometimes judge ourselves just over the line and
+                    # invert the apogee/perigee.
+                    if A >= P:
+                        data.As[i+1][j] = A
+                        data.Ps[i+1][j] = P
+                    else:
+                        data.As[i+1][j] = P
+                        data.Ps[i+1][j] = A
 
                     data.Ts[i+1][j] = keplerian_period(data.As[i+1][j],
                                                        data.Ps[i+1][j])
                     data.valid[i+1][j] = 1
-                assert(data.As[i+1][j] >= data.Ps[i+1][j])
             t += dt
 
         # Update the number of valid values
