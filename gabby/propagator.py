@@ -144,6 +144,8 @@ class StatsPropagator(object):
         are collected in the initialization phase.
         """
 
+        logging.info(f"Propagating")
+
         L = data.L
         N = data.N
 
@@ -161,62 +163,59 @@ class StatsPropagator(object):
         # The beginning is a good place to begin
         t = data.start_ts
 
+        # FIXME: Can do multiprocessing across fragments
+
         # Forward pass
         for i in range(N-1):
+            logging.info(f"  Propagating Frame: {i+1} / {N}")
             for j in range(L):
                 frag = data.names[j]
                 A = data.As[i][j]
                 P = data.Ps[i][j]
-                assert(A >= P)
 
+                if A and not data.As[i+1][j]:
+                    # We have data now, but not in the future.  We
+                    # should evaluate this frame for propagation.
 
-        #         if A < P:
-        #             print(i, j)
-        #             assert(A >= P)
-        #         if A and not data.As[i+1][j]:
-        #             if P <= decay_alt:
-        #                 data.scope_end[frag] = t
-        #                 data.valid[i+1][j] = 0
-        #                 continue
+                    # The perigee is already at or below the decay
+                    # altitude, so we're going to drop it off the map
+                    # now.
+                    if P <= decay_alt:
+                        data.scope_end[frag] = t
+                        data.valid[i+1][j] = 0
+                        continue
 
-        #             # predict the next value
-        #             idx_A = int((A - self.decay.Ap_min) / self.decay.dAp)
-        #             idx_P = int((P - self.decay.Pp_min) / self.decay.dPp)
+                    # Find the indexes into the tables
+                    idx_A, idx_P = self.decay.index_for(A, P)
 
-        #             if idx_A >= self.decay.n_A_bins or \
-        #                idx_P >= self.decay.n_P_bins:
-        #                 data.scope_end[frag] = t
-        #                 data.valid[i+1][j] = 0
-        #                 continue
+                    # Find the decay rates (dA/dt and dP/dt)
+                    rate_A = self.decay.median[0][idx_A][idx_P]
+                    rate_P = self.decay.median[1][idx_A][idx_P]
+                    if abs(rate_P) > abs(rate_A):
+                        # FIXME: This is a problem with Moral Decay.
+                        # Sometimes the perigee decay rate exceeds the
+                        # apogee decay rate.  At a glance, this seems
+                        # to happen when we have few data points to go
+                        # on so noise in the data has an outsized
+                        # impact.  When this happens, as a hack, we
+                        # swap it round.  This issue will be fixed
+                        # when we switch to a history-informed
+                        # physical model in the non-descript future.
+                        rate_A = self.decay.median[1][idx_A][idx_P]
+                        rate_P = self.decay.median[0][idx_A][idx_P]
 
-        #             rate_A = self.decay.median[0][idx_A][idx_P]
-        #             rate_P = self.decay.median[1][idx_A][idx_P]
+                    # Put the neew values in the next time-bin
+                    data.As[i+1][j] = A + dt * rate_A
+                    data.Ps[i+1][j] = P + dt * rate_P
 
-        #             # SENILE
-        #             # if not rate_A
-        #             #     rate_A = self.decay.median[0][idx_A][idx_P]
-        #             if not rate_A:
-        #                 data.scope_end[frag] = t
-        #                 data.valid[i+1][j] = 0
-        #                 continue
+                    data.Ts[i+1][j] = keplerian_period(data.As[i+1][j],
+                                                       data.Ps[i+1][j])
+                    data.valid[i+1][j] = 1
+                assert(data.As[i+1][j] >= data.Ps[i+1][j])
+            t += dt
 
-        #             delta_A = dt * rate_A
-        #             delta_P = dt * rate_P
-        #             A = A - delta_A
-        #             P = P - delta_P
-        #             if A > P:
-        #                 data.As[i+1][j] = A
-        #                 data.Ps[i+1][j] = P
-        #             else:
-        #                 data.As[i+1][j] = P
-        #                 data.Ps[i+1][j] = A
-        #             data.Ts[i+1][j] = keplerian_period(data.As[i+1][j], data.Ps[i+1][j])
-        #             data.valid[i+1][j] = 1
-        #         assert(data.As[i+1][j] >= data.Ps[i+1][j])
-        #     t += dt
-
-        # # Update the number of valid values
-        # data.Ns = np.sum(data.valid, axis=1, dtype=np.int64)
+        # Update the number of valid values
+        data.Ns = np.sum(data.valid, axis=1, dtype=np.int64)
 
 
 def keplerian_period(A, P):

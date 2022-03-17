@@ -240,6 +240,7 @@ class GabbyDB(object):
 
         Returns a CloudDescriptor object
         """
+        assert(len(fragments))
         return self._load_data(fragments, txn=txn, cache=cache, apt=True)
 
     def apt_cache_names(self):
@@ -288,6 +289,7 @@ class GabbyDB(object):
         for k, v in cursor:
             d[N], t[N] = parse_key(k)
             A[N], P[N], T[N] = unpack_apt(v)
+            assert(A[N] >= P[N])
             N += 1
             if 0 == N % 1e6:
                 logging.info(f"Retreived {N} records")
@@ -419,6 +421,8 @@ class GabbyDB(object):
         # numpy dimensions
         N = 0
         L = len(fragments)
+
+        assert(0 < L)
 
         logging.info(f"Loading data for {L} fragments")
 
