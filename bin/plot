@@ -85,7 +85,7 @@ if __name__ == '__main__':
                         dest='db_path',
                         required=False,
                         type=str,
-                        default='output/tle.db',
+                        default='../tle.db',
                         help='Location of the lmdb (%(default)s)')
 
     parser.add_argument('--config-file', '-c',
@@ -238,26 +238,23 @@ if __name__ == '__main__':
             tgt_cache[cache_name] = data
 
         if tgt.getboolean('fwd-prop'):
+            # Forward propagation is from last observation to decay
             logging.info(f"  Forward propagation requested")
-
-            prime = gabby.Optimus(base=['99025'], cache=global_cache, db=db)
-            drag = prime.bstar_percentiles()
 
             prop = gabby.StatsPropagator(tgt=tgt,
                                          cfg=cfg,
                                          global_cache=global_cache,
-                                         db=db,
-                                         drag=drag)
+                                         db=db)
             prop.propagate(data)
 
-            plotter = gabby.GabbyPlotter(cfg=cfg['general'],
-                                         tgt=tgt,
-                                         cache_dir=tgt_cache_dir,
-                                         img_dir=img_dir,
-                                         output_dir=output_dir,
-                                         data=data,
-                                         db=db)
-            plotter.plot(n_threads=args.n_threads)
+        plotter = gabby.GabbyPlotter(cfg=cfg['general'],
+                                     tgt=tgt,
+                                     cache_dir=tgt_cache_dir,
+                                     img_dir=img_dir,
+                                     output_dir=output_dir,
+                                     data=data,
+                                     db=db)
+        plotter.plot(n_threads=args.n_threads)
 
     # elif args.plot_type == 'bstar':
     #     plotter = gabby.BStarPlotter(cfg=cfg['general'],

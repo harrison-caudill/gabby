@@ -22,7 +22,7 @@ if __name__ == '__main__':
                         dest='db_path',
                         required=False,
                         type=str,
-                        default='output/tle.db',
+                        default='../tle.db',
                         help='Location of the tle lmdb (%(default)s)')
 
     parser.add_argument('--force', '-f',

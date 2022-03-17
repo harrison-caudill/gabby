@@ -2,7 +2,7 @@ from .utils import mkdir_p
 from .utils import setup_logging
 from .undertaker import Undertaker
 from .gabby_plotter import GabbyPlotter
-from .gabby_plotter import GabbyDataModel
+from .gabby_data_model import GabbyDataModel
 from .bstar_plotter import BStarPlotter
 from .cache import GabbyCache
 from .transformer import Jazz

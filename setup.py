@@ -135,6 +135,7 @@ setup(
                       'matplotlib',
                       'TLE-tools',
                       'astropy',
+                      'lmdb',
                       'sgp4'],
 
     # List additional groups of dependencies here (e.g. development
