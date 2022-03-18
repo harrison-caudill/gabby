@@ -85,7 +85,7 @@ if __name__ == '__main__':
                         dest='db_path',
                         required=False,
                         type=str,
-                        default='output/tle.db',
+                        default='../tle.db',
                         help='Location of the lmdb (%(default)s)')
 
     parser.add_argument('--config-file', '-c',
@@ -131,7 +131,8 @@ if __name__ == '__main__':
                         type=str,
                         default='gabby',
                         choices=['gabby',
-                                 'bstar'],
+                                 'bstar',
+                                 'num'],
                         help='Which plot type to build (%(default)s)')
 
     parser.add_argument('--num-threads', '-n',
@@ -238,6 +239,7 @@ if __name__ == '__main__':
             tgt_cache[cache_name] = data
 
         if tgt.getboolean('fwd-prop'):
+            # Forward propagation is from last observation to decay
             logging.info(f"  Forward propagation requested")
 
             prop = gabby.StatsPropagator(tgt=tgt,
@@ -255,15 +257,37 @@ if __name__ == '__main__':
                                      db=db)
         plotter.plot(n_threads=args.n_threads)
 
-    # elif args.plot_type == 'bstar':
-    #     plotter = gabby.BStarPlotter(cfg=cfg['general'],
-    #                                  tgt=tgt,
-    #                                  output_dir=output_dir,
-    #                                  cache_dir=args.cache_dir%arg_dict,
-    #                                  img_dir=img_dir,
-    #                                  full_db_path=full_db_path,
-    #                                  frag_db_path=frag_db_path)
-    #     plotter.plot(n_threads=args.n_threads)
+    elif args.plot_type == 'num':
+
+        cache_name = gabby.GabbyDataModel.cache_name
+        if cache_name in tgt_cache:
+            logging.info(f"  Found data in the local cache.")
+            data = tgt_cache[cache_name]
+        else:
+            data = gabby.GabbyDataModel(tgt)
+            data.fetch_from_db(db)
+            tgt_cache[cache_name] = data
+
+        if tgt.getboolean('fwd-prop'):
+            # Forward propagation is from last observation to decay
+            logging.info(f"  Forward propagation requested")
+
+            prop = gabby.StatsPropagator(tgt=tgt,
+                                         cfg=cfg,
+                                         global_cache=global_cache,
+                                         db=db)
+            after_obs = tgt.getboolean('prop-after-observation')
+            prop.propagate(data, prop_after_obs=after_obs)
+
+        # Do the Deed!!!
+        plotter = gabby.NumberPlotter(cfg=cfg['general'],
+                                      tgt=tgt,
+                                      cache_dir=tgt_cache_dir,
+                                      img_dir=img_dir,
+                                      output_dir=output_dir,
+                                      data=data,
+                                      db=db)
+        plotter.plot(n_threads=args.n_threads)
 
     else:
         logging.critical(f"WHAT DID YOU DO??? {args.plot_type}")

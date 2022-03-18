@@ -24,330 +24,6 @@ from .transformer import Jazz
 from .cache import GabbyCache
 
 
-class GabbyDataModel(DataModel):
-    """Raw data employed by the Gabby Plotter.
-    """
-
-    cache_name = 'gabby_data_model'
-
-    def __init__(self, tgt, tgt_cache=None):
-
-        self.tgt = tgt
-
-        # The list of base satellites who's daughters are to be
-        # tracked.  It has to be a list so that we can handle
-        # collisions and intentional detonations.
-        self.target_des = json.loads(self.tgt['intldes'])
-
-        # Mask off the original rocket body, as it's a distraction
-        self.mask = json.loads(self.tgt['mask'])
-
-        # Pull in the time boundaries from the config file
-        self.start_d = parse_date_d(self.tgt['start-date'])
-        self.end_d = parse_date_d(self.tgt['end-date'])
-
-        # Time step between images
-        self.dt = datetime.timedelta(days=self.tgt.getint('plot-period'))
-
-    def fetch_from_db(self, db):
-        """Loads the data from the database.
-        """
-
-        # First, find when pieces come into scope and when they go out
-        self.scope_start, self.scope_end = db.load_scope(self.target_des)
-
-        # The results will be sorted in this order
-        fragments = sorted(list(self.scope_start.keys()))
-        fragments = [f for f in fragments if f not in self.mask]
-
-        # SENILE
-        fragments = fragments[:10]
-        self.names = fragments
-
-        apt = self.apt = db.load_apt(fragments)
-
-        # Get our array dimensions
-        L = self.L = len(fragments)
-        N = self.N = int(math.ceil((self.end_d - self.start_d)/self.dt))+1
-
-        # For propagation purposes, it's nice to know the first and
-        # last observation.  This will hold the index into the array
-        # of the first and last entries.
-        boundaries = self.boundaries = np.zeros((self.L, 2), dtype=np.int)
-
-        logging.info(f"  Shape of data: {N}, {L}")
-
-        # Get the integer timestamps to use for indexing
-        self.start_ts = start_ts = dt_to_ts(self.start_d)
-        self.end_ts = end_ts = dt_to_ts(self.end_d)
-        dt_s = int(self.dt.total_seconds())
-        timestamps = np.arange(start_ts, end_ts+dt_s, dt_s, dtype=np.int)
-        assert(N == len(timestamps))
-
-        # Before and after values for the timestamp and Apogee/Perigee
-        before_ts = np.zeros((N, L), dtype=np.float32)
-        tgt_ts = np.zeros((N, L), dtype=np.float32)
-        after_ts = np.zeros((N, L), dtype=np.float32)
-
-        before_A = np.zeros((N, L), dtype=np.float32)
-        after_A = np.zeros((N, L), dtype=np.float32)
-
-        before_P = np.zeros((N, L), dtype=np.float32)
-        after_P = np.zeros((N, L), dtype=np.float32)
-
-        before_T = np.zeros((N, L), dtype=np.float32)
-        after_T = np.zeros((N, L), dtype=np.float32)
-
-        valid = np.zeros((N, L), dtype=np.int8)
-
-        # The big main loop
-        j = 0
-        for i in range(L):
-            frag = fragments[i]
-            logging.info(f"    Fetching data for {frag} ({i+1}/{L})")
-
-            t = self.apt.t[i][:self.apt.N[i]]
-
-            # loop through the target timestamps
-            for j in range(N):
-                tgt_ts = timestamps[j]
-                if tgt_ts > self.scope_end[frag]: break
-
-                next_idx = np.searchsorted(t, tgt_ts)
-                next_ts = apt.t[i][next_idx]
-                next_A = apt.A[i][next_idx]
-                next_P = apt.P[i][next_idx]
-                next_T = apt.T[i][next_idx]
-                prev_idx = next_idx - 1
-
-                if next_ts == tgt_ts:
-                    prev_ts = next_ts-dt_s
-                    prev_A = next_A
-                    prev_P = next_P
-                    prev_T = next_T
-                else:
-                    # If we're too early, keep moving
-                    if 0 > prev_idx: continue
-
-                    # We now know that the prev and next values are
-                    # positive and contained within the apt values
-                    prev_ts = apt.t[i][prev_idx]
-                    prev_A = apt.A[i][prev_idx]
-                    prev_P = apt.P[i][prev_idx]
-                    prev_T = apt.T[i][prev_idx]
-
-                # Register the values
-                before_ts[j][i] = prev_ts
-                before_A[j][i] = prev_A
-                before_P[j][i] = prev_P
-                before_T[j][i] = prev_T
-                after_ts[j][i] = next_ts
-                after_A[j][i] = next_A
-                after_P[j][i] = next_P
-                after_T[j][i] = next_T
-                valid[j][i] = 1
-
-                # We win
-                j += 1
-
-        logging.info(f"  Computing temporal offsets")
-        dt = after_ts - before_ts
-        off_before = (tgt_ts - before_ts)/dt
-        off_after = (after_ts - tgt_ts)/dt
-
-        logging.info(f"  Interpolating Values")
-        t = tgt_ts
-        A = before_A * off_before + after_A * off_after
-        P = before_P * off_before + after_P * off_after
-        T = before_T * off_before + after_T * off_after
-
-        Ns = np.sum(valid, axis=1, dtype=np.int64)
-
-        logging.info(f"  Removing the nans")
-        A = np.where(np.isnan(A), 0, A)
-        P = np.where(np.isnan(A), 0, P)
-        T = np.where(np.isnan(A), 0, T)
-
-        logging.info(f"  Registering the resulting data")
-        self.ts = timestamps
-        self.As = A
-        self.Ps = P
-        self.Ts = T
-        self.Ns = Ns
-        self.valid = valid
-
-    # def fetch_from_db(self, db):
-    #     """Loads the data from the database.
-    #     """
-
-    #     # First, find when pieces come into scope and when they go out
-    #     self.scope_start, self.scope_end = db.load_scope(self.target_des)
-
-    #     # The results will be sorted in this order
-    #     fragments = sorted(list(self.scope_start.keys()))
-    #     fragments = [f for f in fragments if f not in self.mask]
-    #     self.names = fragments
-
-    #     # Basic read-only transaction
-    #     txn = db.txn()
-
-    #     # Initialize our main cursor
-    #     cursor = txn.cursor(db=db.db_apt)
-    #     cursor.first()
-
-    #     # Get our array dimensions
-    #     L = self.L = len(fragments)
-    #     N = self.N = int(math.ceil((self.end_d - self.start_d)/self.dt))+1
-
-    #     # For propagation purposes, it's nice to know the first and
-    #     # last observation.  This will hold the index into the array
-    #     # of the first and last entries.
-    #     self.boundaries = np.zeros((self.L, 2), dtype=np.int)
-
-    #     logging.info(f"  Shape of data: {N}, {L}")
-
-    #     # Get the integer timestamps to use for indexing
-    #     start_ts = dt_to_ts(self.start_d)
-    #     end_ts = dt_to_ts(self.end_d)
-    #     dt_s = int(self.dt.total_seconds())
-    #     timestamps = np.arange(start_ts, end_ts+dt_s, dt_s, dtype=np.int)
-    #     assert(N == len(timestamps))
-
-    #     # Before and after values for the timestamp and Apogee/Perigee
-    #     before_ts = np.zeros((N, L), dtype=np.float32)
-    #     tgt_ts = np.zeros((N, L), dtype=np.float32)
-    #     after_ts = np.zeros((N, L), dtype=np.float32)
-
-    #     before_A = np.zeros((N, L), dtype=np.float32)
-    #     after_A = np.zeros((N, L), dtype=np.float32)
-
-    #     before_P = np.zeros((N, L), dtype=np.float32)
-    #     after_P = np.zeros((N, L), dtype=np.float32)
-
-    #     before_T = np.zeros((N, L), dtype=np.float32)
-    #     after_T = np.zeros((N, L), dtype=np.float32)
-
-    #     valid = np.zeros((N, L), dtype=np.int8)
-
-    #     # The big main loop
-    #     j = 0
-    #     for i in range(L):
-    #         frag = fragments[i]
-    #         logging.info(f"    Fetching data for {frag} ({i+1}/{L})")
-    #         frag_b = frag.encode()
-    #         frag_len = len(frag)
-
-    #         prev_ts = None
-    #         prev_v = None
-
-    #         # loop through the target timestamps
-    #         for j in range(N):
-    #             tgt_ts = timestamps[j]
-
-    #             # Seek to the target
-    #             srch = fmt_key(des=frag, ts=tgt_ts)
-    #             cursor.set_range(srch)
-
-    #             # This is the first on/or AFTER the target
-    #             k, v = cursor.item()
-
-    #             # If we don't have anything on/after the target, we're
-    #             # done
-    #             if not k[:frag_len] == frag_b: break
-
-    #             des, ts = parse_key(k)
-
-    #             # The start is only updated once, the end is always
-    #             # updated
-    #             if not self.boundaries[i][0]: self.boundaries[i][0] = ts
-    #             self.boundaries[i][1] = ts
-
-    #             # If we're beyond the end of the table, or the end of
-    #             # the fragment, we just continue
-    #             #if des != frag: break
-
-    #             # Since the key is guaranteed to be on or after the
-    #             # search key, we can unconditionally assign the next
-    #             # value here.
-    #             next_ts = ts
-    #             next_v = v
-
-    #             if ts == tgt_ts:
-    #                 # If we are *exactly* at the target, we can assign
-    #                 # the prev val to 0 and exactly one step away.
-    #                 prev_ts = tgt_ts - dt_s
-    #                 prev_v = v
-
-    #             else:
-    #                 # We have an observation AFTER, but we need one
-    #                 # before to interpolate.
-
-    #                 # Move the cursor back for the before timestamp/value
-    #                 cursor.prev()
-    #                 k, v = cursor.item()
-
-    #                 # If we don't have anything before the current
-    #                 # observation, then we'll just have to hope that
-    #                 # we can find a next->next value.
-    #                 if not k[:frag_len] == frag_b: continue
-    #                 #if not k: continue
-
-    #                 des, ts = parse_key(k)
-
-    #                 # Same as above.
-    #                 #if des != frag: continue
-
-    #                 # We win.  We found a previous entry.
-    #                 prev_ts = ts
-    #                 prev_v = v
-
-    #             if prev_v:
-    #                 # Register the values
-    #                 A, P, T = unpack_apt(prev_v)
-    #                 before_ts[j][i] = prev_ts
-    #                 before_A[j][i] = A
-    #                 before_P[j][i] = P
-    #                 before_T[j][i] = T
-    #                 A, P, T = unpack_apt(next_v)
-    #                 after_ts[j][i] = next_ts
-    #                 after_A[j][i] = A
-    #                 after_P[j][i] = P
-    #                 after_T[j][i] = T
-    #                 valid[j][i] = 1
-
-    #                 # We win
-    #                 j += 1
-
-    #     # We're done with our read-only transaction now
-    #     txn.commit()
-
-    #     logging.info(f"  Computing temporal offsets")
-    #     dt = after_ts - before_ts
-    #     off_before = (tgt_ts - before_ts)/dt
-    #     off_after = (after_ts - tgt_ts)/dt
-
-    #     logging.info(f"  Interpolating Values")
-    #     t = tgt_ts
-    #     A = before_A * off_before + after_A * off_after
-    #     P = before_P * off_before + after_P * off_after
-    #     T = before_T * off_before + after_T * off_after
-
-    #     Ns = np.sum(valid, axis=1, dtype=np.int64)
-
-    #     logging.info(f"  Removing the nans")
-    #     A = np.where(np.isnan(A), 0, A)
-    #     P = np.where(np.isnan(A), 0, P)
-    #     T = np.where(np.isnan(A), 0, T)
-
-    #     logging.info(f"  Registering the resulting data")
-    #     self.ts = timestamps
-    #     self.As = A
-    #     self.Ps = P
-    #     self.Ts = T
-    #     self.Ns = Ns
-    #     self.valid = valid
-
-
 class GabbyPlotContext(object):
     """Easily serializeable object with necessary data for plotting.
 
@@ -388,6 +64,26 @@ class GabbyPlotContext(object):
         self.Xt = np.arange(self.data.start_d,
                             self.data.end_d+self.data.dt,
                             self.data.dt)
+
+        self.Xts = np.arange(dt_to_ts(self.data.start_d),
+                             dt_to_ts(self.data.end_d+self.data.dt),
+                             self.data.dt.total_seconds())
+
+        # The date on which we start showing forward propagation
+        if 'fwd-prop-start-date' in self.tgt:
+            timestr = self.tgt['fwd-prop-start-date']
+            self.fwd_prop_start_dt = parse_date_d(timestr)
+            self.fwd_prop_start_ts = dt_to_ts(self.fwd_prop_start_dt)
+            for i in range(len(self.Xts)):
+                if self.Xts[i] == self.fwd_prop_start_ts:
+                    self.fwd_prop_idx = i
+                    break
+                elif self.Xts[i] > self.fwd_prop_start_ts:
+                    self.fwd_prop_idx = i-1
+                    break
+        else:
+            self.fwd_prop_start_date = None
+            self.fwd_prop_idx = None
 
     def fetch_from_db(self, db):
         """Fetches any necessary data from the DB for the plot context.
@@ -619,7 +315,15 @@ class GabbyPlotter(object):
         logging.info(f"  Preparing plot ({idx}/{ctx.data.N})")
 
         # Plot the number of pieces
-        ax_n.plot(ctx.Xt[:idx+1], ctx.data.Ns[:idx+1])
+        if ctx.fwd_prop_idx and idx >= ctx.fwd_prop_idx:
+            obs_idx = min(idx+1, ctx.fwd_prop_idx)
+            ax_n.plot(ctx.Xt[:obs_idx+1], ctx.data.Ns[:obs_idx+1],
+                      color=ctx.perigee_color)
+            ax_n.plot(ctx.Xt[obs_idx:idx+1], ctx.data.Ns[obs_idx:idx+1],
+                      color=ctx.apogee_color)
+        else:
+            ax_n.plot(ctx.Xt[:idx+1], ctx.data.Ns[:idx+1],
+                      color=ctx.perigee_color)
 
         # Plot the comparators
         for i in range(len(ctx.comp_X)):

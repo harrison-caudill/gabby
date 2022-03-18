@@ -96,6 +96,10 @@ def unpack_apt(val):
     """
     return struct.unpack(APT_STRUCT_FMT, val)
 
+APT_OFF_APOGEE = 0
+APT_OFF_PERIGEE = 1
+APT_OFF_PERIOD = 2
+APT_OFF_CAP = 3
 def pack_apt(A=None, P=None, T=None):
     """Packs values for an apt-table entry.
     """
@@ -122,6 +126,18 @@ def unpack_tle(val):
     return (n, ndot, nddot, bstar, tle_num, inc,
             raan, ecc, argp, mean_anomaly, rev_num)
 
+TLE_OFF_MEAN_MOTION = 0
+TLE_OFF_NDOT = 1
+TLE_OFF_NDDOT = 2
+TLE_OFF_BSTAR = 3
+TLE_OFF_TLE_NUM = 4
+TLE_OFF_INC = 5
+TLE_OFF_RAAN = 6
+TLE_OFF_ECC = 7
+TLE_OFF_ARGP = 8
+TLE_OFF_MEAN_ANOMALY = 9
+TLE_OFF_REV_NUM = 10
+TLE_OFF_CAP = 11
 def pack_tle(n=None,
              ndot=None,
              nddot=None,
@@ -153,4 +169,4 @@ def ts_to_dt(ts):
     The ts CANNOT be negative.
     """
     assert(0 <= ts)
-    return EPOCH + datetime.timedelta(seconds=ts)
+    return EPOCH + datetime.timedelta(seconds=int(ts))

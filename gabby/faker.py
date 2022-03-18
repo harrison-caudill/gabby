@@ -139,6 +139,29 @@ class FakeDB(object):
             T = self._T(A, P)
             self._fill_apt(des[i], zip(t, A, P, T))
 
+    def build_manual(self):
+        """Builds and stores the tAPT values specified in the config.
+
+        It'll use the A and P to compute T.
+
+        Consumes:
+          * manual-intldes
+          * manual-t
+          * manual-A
+          * manual-P
+        """
+
+        des = json.loads(self.tgt['manual-intldes'])
+        t = json.loads(self.tgt['manual-t'])
+        A = json.loads(self.tgt['manual-A'])
+        P = json.loads(self.tgt['manual-P'])
+
+        L = len(des)
+
+        for i in range(L):
+            T = self._T(A[i], P[i])
+            self._fill_apt(des[i], zip(t[i], A[i], P[i], T))
+
     def build_norm(self):
         """Builds and stores a normal variate of fragments.
 

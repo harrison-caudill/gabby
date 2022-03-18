@@ -1,6 +1,7 @@
 
 import datetime
 import math
+import tletools
 
 class TLE(object):
     """Internal representation of a TLE.
@@ -63,7 +64,8 @@ class TLE(object):
 
         if (not isinstance(cat_number, int)
             or cat_number <=0
-            or cat_number >= 10**5):
+            or cat_number >= 10**6):
+            print(type(cat_number))
             raise ValueError("Invalid Satellite Number: %s" % cat_number)
 
         if epoch is None:
@@ -95,6 +97,12 @@ class TLE(object):
         self.mean_anomaly_deg = mean_anomaly
         self.rev_num = rev_num
         self.name = name
+
+    def to_sgp4(self):
+        """Produces an initialized Satrec object for Brandon's SGP4 package.
+
+        Wrapper around Brandon Rhodes' code.
+        """
 
     @classmethod
     def from_poli(cls,
@@ -128,8 +136,7 @@ class TLE(object):
         launch_piece = str(tle.int_desig)[-1]
 
         # Compute the epoch datetime object
-        yr = tle.epoch_year + 1900
-        if yr < 1957: yr += 100
+        yr = tle.epoch_year
         day = int(math.floor(tle.epoch_day))
         rem = tle.epoch_day - day
         hrs = int(rem * 24)
@@ -140,7 +147,7 @@ class TLE(object):
         epoch_s = '%d %3.3d %2.2d %2.2d %2.2d' % (yr, day, hrs, mins, secs)
         epoch = datetime.datetime.strptime(epoch_s, '%Y %j %H %M %S')
 
-        return TLE(cat_number=tle.norad,
+        return TLE(cat_number=int(tle.norad),
                    classification=tle.classification,
                    launch_year=launch_year,
                    launch_number=launch_num,

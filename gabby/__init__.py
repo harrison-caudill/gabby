@@ -2,10 +2,13 @@ from .utils import mkdir_p
 from .utils import setup_logging
 from .undertaker import Undertaker
 from .gabby_plotter import GabbyPlotter
-from .gabby_plotter import GabbyDataModel
+from .gabby_data_model import GabbyDataModel
 from .bstar_plotter import BStarPlotter
+from .number_plotter import NumberPlotter
 from .cache import GabbyCache
 from .transformer import Jazz
+from .transformer import Optimus
+from .moral_decay import MoralDecay
 from .tle import TLE
 from .db import GabbyDB
 from .faker import FakeDB

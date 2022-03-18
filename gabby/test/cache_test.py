@@ -15,6 +15,15 @@ class Foo(object):
 
 class TestCache(object):
 
+    def test_numpy(self, cache):
+
+        x = np.zeros(10)
+        name = 'foo'
+        cache[name] = x
+
+        y = cache[name]
+        assert(np.all(x == y))
+
     def test_all_the_things(self, cache):
         assert(os.path.isdir(cache.path))
 

@@ -45,12 +45,14 @@ class StatsPropagator(object):
                  tgt_cache=None,
                  db=None,
                  cfg=None,
-                 tgt=None):
+                 tgt=None,
+                 drag=None):
         self.global_cache = global_cache
         self.tgt_cache = tgt_cache
         self.db = db
         self.cfg = cfg
         self.tgt = tgt
+        self.drag = drag
         self._init_global_stats()
 
     def _cfg_hash(self, cfg):
@@ -126,7 +128,8 @@ class StatsPropagator(object):
             filtered.plot('output/filtered.png', idx, title=f"filtered {deriv.fragments[idx]}")
             deriv.plot('output/deriv.png', idx, title=f"derivative {deriv.fragments[idx]}")
 
-            self.decay = decay = jazz.decay_rates(apt, filtered, deriv)
+            self.decay = decay = jazz.decay_rates(apt, filtered, deriv,
+                                                  drag=self.drag)
 
             logging.info(f"  Adding a little moral decay to the cache")
             self.global_cache[decay_name] = decay
@@ -134,12 +137,18 @@ class StatsPropagator(object):
         decay.plot_mesh('output/mesh.png', data='median')
         #decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
 
-    def propagate(self, data, fwd=True, rev=True):
+    def propagate(self, data, fwd=True, rev=True, prop_after_obs=False):
         """Propagates the <data> forward according to <tgt>.
+
+        prop_after_obs: Means that we start propagating as soon as we
+                        observe the fragment.  That way we can compare
+                        the propagator to the observations.
 
         Global statistics necessary to perform the forward propagation
         are collected in the initialization phase.
         """
+
+        logging.info(f"Propagating")
 
         L = data.L
         N = data.N
@@ -148,37 +157,107 @@ class StatsPropagator(object):
 
         decay_alt = self.tgt.getint('decay-altitude')
 
-        for i in range(N-1):
+        drop_early = self.tgt.getboolean('drop-early-losses')
+
+        if rev:
+            # If we're doing reverse propagation then we assume that
+            # all of the fragments come into scope at the time of the
+            # incident.
+            for i in range(L):
+                data.scope_start[data.names[i]] = data.incident_ts
+
+        # The beginning is a good place to begin
+        t = data.start_ts
+
+        # FIXME: Can do multiprocessing across fragments
+
+        fwd_prop_start = 0
+
+        decay_alts = np.zeros(L) + decay_alt
+
+        if drop_early:
             for j in range(L):
+                for i in range(N-1):
+                    P = data.Ps[i][j]
+                    if P and not data.Ps[i+1][j]:
+                        decay_alts[j] = P
+                        break
+            print(decay_alts)
+
+        # Forward pass
+        for i in range(N-1):
+            logging.info(f"  Propagating Frame: {i+1} / {N}")
+            for j in range(L):
+                frag = data.names[j]
                 A = data.As[i][j]
                 P = data.Ps[i][j]
-                if A and not data.As[i+1][j]:
-                    assert(A > P)
-                    if P <= decay_alt: continue
 
-                    # predict the next value
-                    assert(dt)
-                    idx_A = int((A - self.decay.Ap_min) / self.decay.dAp)
-                    idx_P = int((P - self.decay.Pp_min) / self.decay.dPp)
-                    rate_A = self.decay.median[0][idx_A][idx_P]
-                    rate_P = self.decay.median[1][idx_A][idx_P]
-                    if not rate_A:
-                        print(self.decay.median[0])
-                        print(idx_A, A, rate_A)
-                        print(idx_P, P, rate_P)
-                    assert(rate_A)
-                    delta_A = dt * rate_A
-                    delta_P = dt * rate_P
-                    data.As[i+1][j] = A - delta_A
-                    data.Ps[i+1][j] = P - delta_P
-                    data.Ts[i+1][j] = keplerian_period(data.As[i+1][j], data.Ps[i+1][j])
+
+
+                do_prop = (A and (not data.As[i+1][j] or prop_after_obs))
+
+                if do_prop:
+
+                    # Register the index of the first forward-predicted frame
+                    if not fwd_prop_start: fwd_prop_start = i+1
+
+                    # We have data now, but not in the future.  We
+                    # should evaluate this frame for propagation.
+
+                    # The perigee is already at or below the decay
+                    # altitude, so we're going to drop it off the map
+                    # now.
+                    if P <= decay_alts[j]:
+                        data.scope_end[frag] = t
+                        data.valid[i+1][j] = 0
+                        continue
+
+                    # Find the indexes into the tables
+                    idx_A, idx_P = self.decay.index_for(A, P)
+
+                    # Find the decay rates (dA/dt and dP/dt)
+                    rate_A = self.decay.mean[0][idx_A][idx_P]
+                    rate_P = self.decay.mean[1][idx_A][idx_P]
+                    if abs(rate_P) > abs(rate_A):
+                        # FIXME: This is a problem with Moral Decay.
+                        # Sometimes the perigee decay rate exceeds the
+                        # apogee decay rate.  At a glance, this seems
+                        # to happen when we have few data points to go
+                        # on so noise in the data has an outsized
+                        # impact.  When this happens, as a hack, we
+                        # swap it round.  This issue will be fixed
+                        # when we switch to a history-informed
+                        # physical model in the non-descript future.
+                        tmp = rate_P
+                        rate_P = rate_A
+                        rate_A = tmp
+
+                    # Compute the new A/P values
+                    A = A + dt * rate_A
+                    P = P + dt * rate_P
+
+                    # Because the apogee decay right is higher we can
+                    # sometimes judge ourselves just over the line and
+                    # invert the apogee/perigee.
+                    if A >= P:
+                        data.As[i+1][j] = A
+                        data.Ps[i+1][j] = P
+                    else:
+                        data.As[i+1][j] = P
+                        data.Ps[i+1][j] = A
+
+                    data.Ts[i+1][j] = keplerian_period(data.As[i+1][j],
+                                                       data.Ps[i+1][j])
                     data.valid[i+1][j] = 1
-                    assert(data.As[i+1][j])
-                    assert(data.As[i+1][j] != A)
+            t += dt
 
-        # Update the scope table so we actually plot things
-        for frag in data.names:
-            data.scope_end[frag] = data.end_ts
+        # Update the number of valid values and preserve the original
+        data.Ns_obs = data.Ns
+        data.Ns = np.sum(data.valid, axis=1, dtype=np.int64)
+
+        # Annotate the beginning of forward propagation
+        data.fwd_prop_start = fwd_prop_start
+
 
 def keplerian_period(A, P):
     """Determines the period of a keplerian ellipitical earth orbit.

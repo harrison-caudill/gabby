@@ -9,7 +9,15 @@ import gabby
 
 
 if __name__ == '__main__':
-    desc = """Ingests data from either local disk or the web.
+    desc = """Fetches data from the DB and stasheds it in the gabby cache.
+
+    Loading a numpy serialized array of raw data is HELLA fast
+    compared to using lmdb.  LMDB is good for smaller transactions and
+    as a good on-disk format, but when you want to loop through a
+    hundred million items, it's kinda slow.  Since most of the
+    parallelized operations will happen in numpy anyway, might as well
+    just start there.  Gathering global statistics on things involves,
+    well, the global set of information.
     """
 
     formatter = argparse.RawTextHelpFormatter
@@ -22,13 +30,17 @@ if __name__ == '__main__':
                         dest='db_path',
                         required=False,
                         type=str,
-                        default='../tle.db',
+                        default='output/tle.db',
                         help='Location of the tle lmdb (%(default)s)')
 
-    parser.add_argument('--force', '-f',
-                        action='store_true',
-                        dest='force',
-                        help='Re-import even if present (%(default)s)')
+    parser.add_argument('--global-cache-path',
+                        metavar='GLOBAL_CACHE_DIR',
+                        action='store',
+                        dest='global_cache_dir',
+                        required=False,
+                        type=str,
+                        default='%(output_dir)s/cache',
+                        help='Cache directory (%(default)s)')
 
     parser.add_argument('--output-directory', '-o',
                         metavar='OUTPUT_DIR',
@@ -39,30 +51,27 @@ if __name__ == '__main__':
                         default='output',
                         help='Output directory (%(default)s)',)
 
-    parser.add_argument('--designator-base', '-D',
-                        metavar='DESIGNATOR',
-                        action='store',
-                        dest='designator',
-                        required=False,
-                        type=str,
-                        help='Base designator to focus snarfing (%(default)s)',)
-
-    parser.add_argument('--store-tles', '-s',
+    parser.add_argument('--cache-apt', '-a',
                         action='store_true',
-                        dest='store_tles',
-                        help='Store the full TLE information (%(default)s)',)
+                        dest='cache_apt',
+                        help='Cache APT',)
 
-    parser.add_argument('--index', '-I',
+    parser.add_argument('--force', '-f',
                         action='store_true',
-                        dest='index',
-                        help='Build the indexes rather than snarf',)
+                        dest='force',
+                        help='Force overwrite',)
+
+    parser.add_argument('--cache-tle-bstar', '-b',
+                        action='store_true',
+                        dest='cache_bstar',
+                        help='Cache B* from the TLE',)
 
     parser.add_argument('--log-file', '-l',
                         metavar='LOG_FILE',
                         action='store',
                         dest='log_file',
                         type=str,
-                        default='%(output_dir)s/snarf-%(fname)s.log',
+                        default='%(output_dir)s/build_cache.log',
                         help='Logfile in output directory (%(default)s)')
 
     parser.add_argument('--log-level', '-L',
@@ -89,7 +98,6 @@ if __name__ == '__main__':
 
 
     arg_dict = {
-        'fname': os.path.basename(args.tle_path),
         }
 
     # Get our output directory all set up
@@ -103,33 +111,13 @@ if __name__ == '__main__':
                         log_level=args.log_level)
     logging.info(f"Giddy up, Gabby!")
 
-    # Go find the undertaker
     db_path = args.db_path % arg_dict
-    db = gabby.GabbyDB(db_path)
-    under = gabby.Undertaker(db=db)
-    logging.info("The Undertaker is In")
+    global_cache_dir = args.global_cache_dir % arg_dict
+    cache = gabby.GabbyCache(global_cache_dir)
+    db = gabby.GabbyDB(db_path, global_cache=cache)
 
-    # txn = db.txn(write=False)
-    # cursor = txn.cursor(db=db.db_apt)
-    # cursor.set_range(','.encode())
-    # i = 0
-    # for k, v, in cursor:
-    #     i += 1
-    #     if not k.startswith(','.encode()): break
-    # print(i)
-    # sys.exit(0)
+    logging.info("Caching some fields")
 
-    if args.index:
-        under.build_scope()
-
-    elif args.tle_path:
-        if args.tle_path.endswith('json'):
-            under.load_json(args.tle_path,
-                            base_des=args.designator,
-                            store_tles=args.store_tles,
-                            force=args.force)
-        else:
-            under.load_tlefile(args.tle_path,
-                               base_des=args.designator,
-                               store_tles=args.store_tles,
-                               force=args.force)
+    if args.cache_apt: db.cache_apt(force=args.force)
+    if args.cache_bstar: db.cache_tle_field(gabby.TLE_OFF_BSTAR,
+                                            force=args.force)
