@@ -4,6 +4,7 @@ from .undertaker import Undertaker
 from .gabby_plotter import GabbyPlotter
 from .gabby_data_model import GabbyDataModel
 from .bstar_plotter import BStarPlotter
+from .number_plotter import NumberPlotter
 from .cache import GabbyCache
 from .transformer import Jazz
 from .transformer import Optimus

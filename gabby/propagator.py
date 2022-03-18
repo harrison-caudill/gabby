@@ -137,8 +137,12 @@ class StatsPropagator(object):
         decay.plot_mesh('output/mesh.png', data='median')
         #decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
 
-    def propagate(self, data, fwd=True, rev=True):
+    def propagate(self, data, fwd=True, rev=True, prop_after_obs=False):
         """Propagates the <data> forward according to <tgt>.
+
+        prop_after_obs: Means that we start propagating as soon as we
+                        observe the fragment.  That way we can compare
+                        the propagator to the observations.
 
         Global statistics necessary to perform the forward propagation
         are collected in the initialization phase.
@@ -165,6 +169,8 @@ class StatsPropagator(object):
 
         # FIXME: Can do multiprocessing across fragments
 
+        fwd_prop_start = 0
+
         # Forward pass
         for i in range(N-1):
             logging.info(f"  Propagating Frame: {i+1} / {N}")
@@ -173,7 +179,11 @@ class StatsPropagator(object):
                 A = data.As[i][j]
                 P = data.Ps[i][j]
 
-                if A and not data.As[i+1][j]:
+                if A and (not data.As[i+1][j] or prop_after_obs):
+
+                    # Register the index of the first forward-predicted frame
+                    if not fwd_prop_start: fwd_prop_start = i+1
+
                     # We have data now, but not in the future.  We
                     # should evaluate this frame for propagation.
 
@@ -224,8 +234,12 @@ class StatsPropagator(object):
                     data.valid[i+1][j] = 1
             t += dt
 
-        # Update the number of valid values
+        # Update the number of valid values and preserve the original
+        data.Ns_obs = data.Ns
         data.Ns = np.sum(data.valid, axis=1, dtype=np.int64)
+
+        # Annotate the beginning of forward propagation
+        data.fwd_prop_start = fwd_prop_start
 
 
 def keplerian_period(A, P):

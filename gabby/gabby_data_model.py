@@ -40,7 +40,7 @@ class GabbyDataModel(DataModel):
         self.target_des = json.loads(self.tgt['intldes'])
 
         # Mask off the original rocket body, as it's a distraction
-        self.mask = json.loads(self.tgt['mask'])
+        self.mask = json.loads(self.tgt['mask']) if 'mask' in self.tgt else None
 
         # Pull in the time boundaries from the config file
         self.start_d = parse_date_d(self.tgt['start-date'])
@@ -49,6 +49,10 @@ class GabbyDataModel(DataModel):
 
         # Time step between images
         self.dt = datetime.timedelta(days=self.tgt.getint('plot-period'))
+
+        # In case we're doing forward propagation, we'll need the
+        # starting offset for graphing purposes.
+        self.fwd_prop_start = None
 
     def fetch_from_db(self, db):
         """Loads the data from the database.

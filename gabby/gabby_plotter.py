@@ -65,6 +65,26 @@ class GabbyPlotContext(object):
                             self.data.end_d+self.data.dt,
                             self.data.dt)
 
+        self.Xts = np.arange(dt_to_ts(self.data.start_d),
+                             dt_to_ts(self.data.end_d+self.data.dt),
+                             self.data.dt.total_seconds())
+
+        # The date on which we start showing forward propagation
+        if 'fwd-prop-start-date' in self.tgt:
+            timestr = self.tgt['fwd-prop-start-date']
+            self.fwd_prop_start_dt = parse_date_d(timestr)
+            self.fwd_prop_start_ts = dt_to_ts(self.fwd_prop_start_dt)
+            for i in range(len(self.Xts)):
+                if self.Xts[i] == self.fwd_prop_start_ts:
+                    self.fwd_prop_idx = i
+                    break
+                elif self.Xts[i] > self.fwd_prop_start_ts:
+                    self.fwd_prop_idx = i-1
+                    break
+        else:
+            self.fwd_prop_start_date = None
+            self.fwd_prop_idx = None
+
     def fetch_from_db(self, db):
         """Fetches any necessary data from the DB for the plot context.
 
@@ -295,7 +315,15 @@ class GabbyPlotter(object):
         logging.info(f"  Preparing plot ({idx}/{ctx.data.N})")
 
         # Plot the number of pieces
-        ax_n.plot(ctx.Xt[:idx+1], ctx.data.Ns[:idx+1])
+        if ctx.fwd_prop_idx and idx >= ctx.fwd_prop_idx:
+            obs_idx = min(idx+1, ctx.fwd_prop_idx)
+            ax_n.plot(ctx.Xt[:obs_idx+1], ctx.data.Ns[:obs_idx+1],
+                      color=ctx.perigee_color)
+            ax_n.plot(ctx.Xt[obs_idx:idx+1], ctx.data.Ns[obs_idx:idx+1],
+                      color=ctx.apogee_color)
+        else:
+            ax_n.plot(ctx.Xt[:idx+1], ctx.data.Ns[:idx+1],
+                      color=ctx.perigee_color)
 
         # Plot the comparators
         for i in range(len(ctx.comp_X)):
