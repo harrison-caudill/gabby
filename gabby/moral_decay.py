@@ -70,7 +70,8 @@ class MoralDecay(object):
         self.mean = self._mean()
         self.cdf = self._cdf()
         self.percentiles = self._percentiles()
-        self.median = self._median(kernel=np.ones(25).reshape((5,5))/25)
+        #self.median = self._median(kernel=np.ones(25).reshape((5,5))/25)
+        self.median = self._median()
         #self._verify_derivatives()
 
     def index_for(self, A, P):

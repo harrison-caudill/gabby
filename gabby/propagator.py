@@ -157,6 +157,8 @@ class StatsPropagator(object):
 
         decay_alt = self.tgt.getint('decay-altitude')
 
+        drop_early = self.tgt.getboolean('drop-early-losses')
+
         if rev:
             # If we're doing reverse propagation then we assume that
             # all of the fragments come into scope at the time of the
@@ -171,6 +173,17 @@ class StatsPropagator(object):
 
         fwd_prop_start = 0
 
+        decay_alts = np.zeros(L) + decay_alt
+
+        if drop_early:
+            for j in range(L):
+                for i in range(N-1):
+                    P = data.Ps[i][j]
+                    if P and not data.Ps[i+1][j]:
+                        decay_alts[j] = P
+                        break
+            print(decay_alts)
+
         # Forward pass
         for i in range(N-1):
             logging.info(f"  Propagating Frame: {i+1} / {N}")
@@ -179,7 +192,11 @@ class StatsPropagator(object):
                 A = data.As[i][j]
                 P = data.Ps[i][j]
 
-                if A and (not data.As[i+1][j] or prop_after_obs):
+
+
+                do_prop = (A and (not data.As[i+1][j] or prop_after_obs))
+
+                if do_prop:
 
                     # Register the index of the first forward-predicted frame
                     if not fwd_prop_start: fwd_prop_start = i+1
@@ -190,7 +207,7 @@ class StatsPropagator(object):
                     # The perigee is already at or below the decay
                     # altitude, so we're going to drop it off the map
                     # now.
-                    if P <= decay_alt:
+                    if P <= decay_alts[j]:
                         data.scope_end[frag] = t
                         data.valid[i+1][j] = 0
                         continue
@@ -199,8 +216,8 @@ class StatsPropagator(object):
                     idx_A, idx_P = self.decay.index_for(A, P)
 
                     # Find the decay rates (dA/dt and dP/dt)
-                    rate_A = self.decay.median[0][idx_A][idx_P]
-                    rate_P = self.decay.median[1][idx_A][idx_P]
+                    rate_A = self.decay.mean[0][idx_A][idx_P]
+                    rate_P = self.decay.mean[1][idx_A][idx_P]
                     if abs(rate_P) > abs(rate_A):
                         # FIXME: This is a problem with Moral Decay.
                         # Sometimes the perigee decay rate exceeds the

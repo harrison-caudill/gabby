@@ -130,7 +130,8 @@ class NumberPlotter(object):
         ax.legend(loc=1)
 
         mkdir_p(self.img_dir)
-        fig.savefig(os.path.join(self.img_dir, "n_fragments.png"))
+        fname = self.tgt.name[4:] + '.png'
+        fig.savefig(os.path.join(self.img_dir, fname))
 
     def plt_setup(self):
         """Perform initialization that doesn't serialize.
