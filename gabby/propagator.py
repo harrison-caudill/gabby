@@ -319,6 +319,7 @@ class StatsPropagator(object):
                     ctx.Ts[i+1][j] = keplerian_period(ctx.As[i+1][j],
                                                       ctx.Ps[i+1][j])
                     ctx.valid[i+1][j] = 1
+
             t += ctx.dt
 
         # Update the number of valid values and preserve the original
