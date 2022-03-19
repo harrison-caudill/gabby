@@ -66,7 +66,7 @@ class MoralDecay(object):
 
         # FIXME: Square time-domain filters don't have the best
         # frequency-domain responses, but, meh, works fine.
-        n = 5
+        n = 3
         m = 2*n-1
         kernel=np.ones(m**2).reshape((m,m))
         kernel /= np.sum(kernel)

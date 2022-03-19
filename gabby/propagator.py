@@ -330,25 +330,3 @@ class StatsPropagator(object):
         ctx.fwd_prop_start = fwd_prop_start
 
         return ctx
-
-
-def keplerian_period(A, P):
-    """Determines the period of a keplerian ellipitical earth orbit.
-
-    A: <np.array> or float
-    P: <np.array> or float
-    returns: <np.array> or float
-
-    Does NOT take into account oblateness or the moon.
-    """
-    Re = (astropy.constants.R_earth/1000.0).value
-    RA = A+Re
-    RP = P+Re
-    e = (RA-RP) / (RA+RP)
-
-    # These are all in meters
-    a = 1000*(RA+RP)/2
-    mu = astropy.constants.GM_earth.value
-    T = 2 * np.pi * (a**3/mu)**.5 / 60.0
-
-    return T
