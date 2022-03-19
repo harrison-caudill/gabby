@@ -375,6 +375,8 @@ class GabbyPlotter(object):
 
             self.cache.put('gabby_plot_ctx', ctx, [])
 
+        ctx.data.apt = None
+
         # We create a great many individual images
         logging.info(f"  Creating image directory: {ctx.img_dir}")
         mkdir_p(ctx.img_dir)

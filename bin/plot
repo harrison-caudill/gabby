@@ -246,7 +246,7 @@ if __name__ == '__main__':
                                          cfg=cfg,
                                          global_cache=global_cache,
                                          db=db)
-            prop.propagate(data)
+            prop.propagate(data, n_threads=args.n_threads)
 
         plotter = gabby.GabbyPlotter(cfg=cfg['general'],
                                      tgt=tgt,
@@ -277,7 +277,9 @@ if __name__ == '__main__':
                                          global_cache=global_cache,
                                          db=db)
             after_obs = tgt.getboolean('prop-after-observation')
-            prop.propagate(data, prop_after_obs=after_obs)
+            prop.propagate(data,
+                           prop_after_obs=after_obs,
+                           n_threads=args.n_threads)
 
         # Do the Deed!!!
         plotter = gabby.NumberPlotter(cfg=cfg['general'],
