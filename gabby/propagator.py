@@ -307,7 +307,7 @@ class StatsPropagator(object):
                     P = P + ctx.dt * rate_P
 
                     # Because the apogee decay right is higher we can
-                    # sometimes judge ourselves just over the line and
+                    # sometimes nudge ourselves just over the line and
                     # invert the apogee/perigee.
                     if A >= P:
                         ctx.As[i+1][j] = A
