@@ -283,9 +283,11 @@ class StatsPropagator(object):
                     # Find the indexes into the tables
                     idx_A, idx_P = ctx.decay.index_for(A, P)
 
+                    dat = ctx.decay.mean
+
                     # Find the decay rates (dA/dt and dP/dt)
-                    rate_A = ctx.decay.median[0][idx_A][idx_P]
-                    rate_P = ctx.decay.median[1][idx_A][idx_P]
+                    rate_A = dat[0][idx_A][idx_P]
+                    rate_P = dat[1][idx_A][idx_P]
                     if abs(rate_P) > abs(rate_A):
                         # FIXME: This is a problem with Moral Decay.
                         # Sometimes the perigee decay rate exceeds the

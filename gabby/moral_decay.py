@@ -64,16 +64,35 @@ class MoralDecay(object):
         self.bins_Ad = np.linspace(Ad_min, Ad_max, self.n_D_bins)
         self.bins_Pd = np.linspace(Pd_min, Pd_max, self.n_D_bins)
 
-        # FIXME: Be nice to use a lowpass rather than median filter
-        #self.mean = self._mean(kernel=np.ones(25).reshape((5,5))/25)
-        self.mean = self._mean()
-        self.mean[0] = scipy.signal.medfilt2d(self.mean[0], kernel_size=5)
-        self.mean[1] = scipy.signal.medfilt2d(self.mean[1], kernel_size=5)
+        # FIXME: Square time-domain filters don't have the best
+        # frequency-domain responses, but, meh, works fine.
+        kernel=np.ones(25).reshape((5,5)) / 25
 
+        # FIXME: Triangular(ish) window works a bit better...don't
+        # remember which window function this is and what its OOB
+        # rejection is...also don't care right now.
+        n = 5
+        window = np.array(list(range(1, n, 1))+[n]+list(range(n-1, 0, -1)))
+        kernel = np.sqrt(np.outer(window, window))
+        kernel /= np.sum(kernel)
+
+        # FIXME: Let's try a Blackman Harris Window
+        window = np.abs(np.blackman(2*n-1))
+        kernel = np.sqrt(np.outer(window, window))
+        kernel /= np.sum(kernel)
+
+        self.mean = self._mean(kernel=kernel)
         self.cdf = self._cdf()
         self.percentiles = self._percentiles()
-        self.median = self._median(kernel=np.ones(25).reshape((5,5))/25)
-        #self.median = self._median()
+        self.median = self._median(kernel=kernel)
+
+        # FIXME: Be nice to use a lowpass rather than median filter
+        #self.mean = self._mean(kernel=np.ones(25).reshape((5,5))/25)
+        # self.mean[0] = scipy.signal.medfilt2d(self.mean[0], kernel_size=5)
+        # self.mean[1] = scipy.signal.medfilt2d(self.mean[1], kernel_size=5)
+        # self.median[0] = scipy.signal.medfilt2d(self.median[0], kernel_size=1)
+        # self.median[1] = scipy.signal.medfilt2d(self.median[1], kernel_size=1)
+
         #self._verify_derivatives()
 
     def index_for(self, A, P):
