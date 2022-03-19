@@ -89,7 +89,6 @@ class MoralDecay(object):
         self.mean = self._mean(kernel=kernel)
 
         # FIXME: Be nice to use a lowpass rather than median filter
-        #self.mean = self._mean(kernel=np.ones(25).reshape((5,5))/25)
         # self.mean[0] = scipy.signal.medfilt2d(self.mean[0], kernel_size=5)
         # self.mean[1] = scipy.signal.medfilt2d(self.mean[1], kernel_size=5)
         # self.median[0] = scipy.signal.medfilt2d(self.median[0], kernel_size=1)
