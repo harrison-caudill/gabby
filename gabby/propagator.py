@@ -1,3 +1,4 @@
+import copy
 import datetime
 import gc
 import json
@@ -7,6 +8,7 @@ import logging
 import math
 import matplotlib
 import matplotlib.pyplot as plt
+import multiprocessing
 import numpy as np
 import os
 import pickle
@@ -31,6 +33,52 @@ class Propagator(object):
     """Parent class for data propagators.
     """
     pass
+
+
+class StatsPropagatorContext(object):
+
+    def __init__(self, prop, data, fwd, rev, prop_after_obs):
+
+        self.fwd = fwd
+        self.rev = rev
+        self.prop_after_obs = prop_after_obs
+
+        self.As = data.As
+        self.Ps = data.Ps
+        self.Ns = data.Ns
+        self.Ns_obs = None
+        self.Ts = data.Ts
+        self.valid = data.valid
+        self.scope_start = data.scope_start
+        self.scope_end = data.scope_end
+        self.L = data.L
+        self.N = data.N
+        self.dt = data.dt.total_seconds()/24/3600.0
+        self.start_ts = data.start_ts
+        self.names = data.names
+        self.decay = prop.decay
+
+        self.decay_alt = prop.tgt.getint('decay-altitude')
+
+        if rev:
+            # If we're doing reverse propagation then we assume that
+            # all of the fragments come into scope at the time of the
+            # incident.
+            for i in range(self.L):
+                data.scope_start[data.names[i]] = data.incident_ts
+
+        self.decay_alts = np.zeros(self.L) + self.decay_alt
+
+        # If we're dropping them before they fully decay, then we'll
+        # want to first find the altitude of the last observation.
+        self.drop_early = prop.tgt.getboolean('drop-early-losses')
+        if self.drop_early:
+            for j in range(self.L):
+                for i in range(self.N-1):
+                    P = data.Ps[i][j]
+                    if P and not data.Ps[i+1][j]:
+                        self.decay_alts[j] = P
+                        break
 
 
 class StatsPropagator(object):
@@ -116,8 +164,7 @@ class StatsPropagator(object):
                 
                 filtered, deriv = jazz.filtered_derivatives(apt,
                                                             min_life=1.0,
-                                                            dt=SECONDS_IN_DAY,
-                                                            fltr=jazz.lpf())
+                                                            dt=SECONDS_IN_DAY)
                 logging.info(f"  Saving derivatives to cache")
                 self.global_cache[deriv_name] = deriv
                 self.global_cache[filtered_name] = filtered
@@ -137,7 +184,11 @@ class StatsPropagator(object):
         decay.plot_mesh('output/mesh.png', data='median')
         #decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
 
-    def propagate(self, data, fwd=True, rev=True, prop_after_obs=False):
+    def propagate(self, data,
+                  fwd=True,
+                  rev=True,
+                  prop_after_obs=False,
+                  n_threads=1):
         """Propagates the <data> forward according to <tgt>.
 
         prop_after_obs: Means that we start propagating as soon as we
@@ -150,51 +201,68 @@ class StatsPropagator(object):
 
         logging.info(f"Propagating")
 
-        L = data.L
-        N = data.N
+        ctx = StatsPropagatorContext(self, data, fwd, rev, prop_after_obs)
 
-        dt = data.dt.total_seconds()/24/3600.0
+        data.Ns_obs = data.Ns
 
-        decay_alt = self.tgt.getint('decay-altitude')
+        if n_threads > 1:
+            # Interleave generation so that they're generated roughly
+            # in order in parallel rather than one block at a time.
+            # [ 0,  N+0,  2N+0, ...]
+            # [ 1,  N+1,  2N+1, ...]
+            # ...
+            # [N-1, 2N-1, 3N-1, ...]
+            tmp = np.linspace(0, ctx.L-1, ctx.L, dtype=np.int)
+            indexes = [tmp[i::n_threads] for i in range(n_threads)]
 
-        drop_early = self.tgt.getboolean('drop-early-losses')
+            # Can't stop the work...
+            work = []
+            for i in range(n_threads):
+                c = copy.deepcopy(ctx)
+                c.indexes = indexes[i]
+                work.append(c)
 
-        if rev:
-            # If we're doing reverse propagation then we assume that
-            # all of the fragments come into scope at the time of the
-            # incident.
-            for i in range(L):
-                data.scope_start[data.names[i]] = data.incident_ts
+            logging.info(f"  Launching the pool with {n_threads} threads")
+            with multiprocessing.Pool(n_threads) as pool:
+                retval = pool.map(StatsPropagator._propagate_frame, work)
+
+            # Recombine the results
+            for t in range(n_threads):
+                for i in work[t].indexes:
+                    data.As[:,i] = retval[t].As[:,i]
+                    data.Ps[:,i] = retval[t].Ps[:,i]
+                    data.Ts[:,i] = retval[t].Ts[:,i]
+                    data.valid[:,i] = retval[t].valid[:,i]
+
+            data.Ns = np.sum(ctx.valid, axis=1, dtype=np.int64)
+
+        else:
+            ctx.indexes = list(range(ctx.L))
+            tmp = StatsPropagator._propagate_frame(ctx)
+            data.Ns
+            data.Ns = tmp.Ns
+            data.As = tmp.As
+            data.Ps = tmp.Ps
+            data.Ts = tmp.Ts
+            data.Vs = tmp.valid
+
+    @classmethod
+    def _propagate_frame(cls, ctx):
 
         # The beginning is a good place to begin
-        t = data.start_ts
-
-        # FIXME: Can do multiprocessing across fragments
+        t = ctx.start_ts
 
         fwd_prop_start = 0
 
-        decay_alts = np.zeros(L) + decay_alt
-
-        if drop_early:
-            for j in range(L):
-                for i in range(N-1):
-                    P = data.Ps[i][j]
-                    if P and not data.Ps[i+1][j]:
-                        decay_alts[j] = P
-                        break
-            print(decay_alts)
-
         # Forward pass
-        for i in range(N-1):
-            logging.info(f"  Propagating Frame: {i+1} / {N}")
-            for j in range(L):
-                frag = data.names[j]
-                A = data.As[i][j]
-                P = data.Ps[i][j]
+        for i in range(ctx.N-1):
+            print(f"  Propagating Frame:{i+1}/{ctx.N} Thread:{ctx.indexes[0]}")
+            for j in ctx.indexes:
+                frag = ctx.names[j]
+                A = ctx.As[i][j]
+                P = ctx.Ps[i][j]
 
-
-
-                do_prop = (A and (not data.As[i+1][j] or prop_after_obs))
+                do_prop = (A and (not ctx.As[i+1][j] or ctx.prop_after_obs))
 
                 if do_prop:
 
@@ -207,17 +275,19 @@ class StatsPropagator(object):
                     # The perigee is already at or below the decay
                     # altitude, so we're going to drop it off the map
                     # now.
-                    if P <= decay_alts[j]:
-                        data.scope_end[frag] = t
-                        data.valid[i+1][j] = 0
+                    if P <= ctx.decay_alts[j]:
+                        ctx.scope_end[frag] = t
+                        ctx.valid[i+1][j] = 0
                         continue
 
                     # Find the indexes into the tables
-                    idx_A, idx_P = self.decay.index_for(A, P)
+                    idx_A, idx_P = ctx.decay.index_for(A, P)
+
+                    dat = ctx.decay.mean
 
                     # Find the decay rates (dA/dt and dP/dt)
-                    rate_A = self.decay.mean[0][idx_A][idx_P]
-                    rate_P = self.decay.mean[1][idx_A][idx_P]
+                    rate_A = dat[0][idx_A][idx_P]
+                    rate_P = dat[1][idx_A][idx_P]
                     if abs(rate_P) > abs(rate_A):
                         # FIXME: This is a problem with Moral Decay.
                         # Sometimes the perigee decay rate exceeds the
@@ -233,49 +303,30 @@ class StatsPropagator(object):
                         rate_A = tmp
 
                     # Compute the new A/P values
-                    A = A + dt * rate_A
-                    P = P + dt * rate_P
+                    A = A + ctx.dt * rate_A
+                    P = P + ctx.dt * rate_P
 
                     # Because the apogee decay right is higher we can
-                    # sometimes judge ourselves just over the line and
+                    # sometimes nudge ourselves just over the line and
                     # invert the apogee/perigee.
                     if A >= P:
-                        data.As[i+1][j] = A
-                        data.Ps[i+1][j] = P
+                        ctx.As[i+1][j] = A
+                        ctx.Ps[i+1][j] = P
                     else:
-                        data.As[i+1][j] = P
-                        data.Ps[i+1][j] = A
+                        ctx.As[i+1][j] = P
+                        ctx.Ps[i+1][j] = A
 
-                    data.Ts[i+1][j] = keplerian_period(data.As[i+1][j],
-                                                       data.Ps[i+1][j])
-                    data.valid[i+1][j] = 1
-            t += dt
+                    ctx.Ts[i+1][j] = keplerian_period(ctx.As[i+1][j],
+                                                      ctx.Ps[i+1][j])
+                    ctx.valid[i+1][j] = 1
+
+            t += ctx.dt
 
         # Update the number of valid values and preserve the original
-        data.Ns_obs = data.Ns
-        data.Ns = np.sum(data.valid, axis=1, dtype=np.int64)
+        ctx.Ns_obs = ctx.Ns
+        ctx.Ns = np.sum(ctx.valid, axis=1, dtype=np.int64)
 
         # Annotate the beginning of forward propagation
-        data.fwd_prop_start = fwd_prop_start
+        ctx.fwd_prop_start = fwd_prop_start
 
-
-def keplerian_period(A, P):
-    """Determines the period of a keplerian ellipitical earth orbit.
-
-    A: <np.array> or float
-    P: <np.array> or float
-    returns: <np.array> or float
-
-    Does NOT take into account oblateness or the moon.
-    """
-    Re = (astropy.constants.R_earth/1000.0).value
-    RA = A+Re
-    RP = P+Re
-    e = (RA-RP) / (RA+RP)
-
-    # These are all in meters
-    a = 1000*(RA+RP)/2
-    mu = astropy.constants.GM_earth.value
-    T = 2 * np.pi * (a**3/mu)**.5 / 60.0
-
-    return T
+        return ctx

@@ -88,16 +88,17 @@ class TestGabbyDataModel(object):
         data = GabbyDataModel(cfg['gabby-test-model'])
         data.fetch_from_db(db.db)
 
-        assert(np.all(data.As == [[450,   0,   0],
-                                  [450, 425,   0],
-                                  [450, 375,   0],
-                                  [  0,   0,   0]]))
-        assert(np.all(data.Ps == [[425,   0,   0],
-                                  [425, 325,   0],
-                                  [425, 275,   0],
-                                  [  0,   0,   0]]))
+        assert(np.all(data.As == [[450,   0,   0, 500],
+                                  [450, 425,   0, 450],
+                                  [450, 375,   0, 400],
+                                  [  0,   0,   0, 0]]))
 
-        assert(np.all(data.valid == [[1, 0, 0],
-                                     [1, 1, 0],
-                                     [1, 1, 0],
-                                     [0, 0, 0]]))
+        assert(np.all(data.Ps == [[425,   0,   0, 400],
+                                  [425, 325,   0, 350],
+                                  [425, 275,   0, 300],
+                                  [  0,   0,   0, 0]]))
+
+        assert(np.all(data.valid == [[1, 0, 0, 1],
+                                     [1, 1, 0, 1],
+                                     [1, 1, 0, 1],
+                                     [0, 0, 0, 0]]))

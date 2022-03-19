@@ -318,12 +318,30 @@ class GabbyPlotter(object):
         if ctx.fwd_prop_idx and idx >= ctx.fwd_prop_idx:
             obs_idx = min(idx+1, ctx.fwd_prop_idx)
             ax_n.plot(ctx.Xt[:obs_idx+1], ctx.data.Ns[:obs_idx+1],
-                      color=ctx.perigee_color)
+                      color=ctx.perigee_color,
+                      label='Observed')
             ax_n.plot(ctx.Xt[obs_idx:idx+1], ctx.data.Ns[obs_idx:idx+1],
-                      color=ctx.apogee_color)
+                      color=ctx.apogee_color,
+                      label='Predicted')
+
+            props = dict(boxstyle='round',
+                         facecolor=ctx.apogee_color,
+                         alpha=0.6)
+            ax_g.text(0.75, 0.9, f"Predicted",
+                    transform=ax_g.transAxes, bbox=props)
         else:
             ax_n.plot(ctx.Xt[:idx+1], ctx.data.Ns[:idx+1],
-                      color=ctx.perigee_color)
+                      color=ctx.perigee_color,
+                      label='Observed')
+            if ctx.fwd_prop_idx:
+                props = dict(boxstyle='round',
+                             facecolor=ctx.perigee_color,
+                             alpha=0.6)
+                ax_g.text(0.75, 0.9, f"Observed",
+                          transform=ax_g.transAxes, bbox=props)
+                ax_n.plot([], [], color=ctx.apogee_color, label='Predicted')
+
+        if ctx.fwd_prop_idx: ax_n.legend(loc=1)
 
         # Plot the comparators
         for i in range(len(ctx.comp_X)):
@@ -374,6 +392,8 @@ class GabbyPlotter(object):
             ctx.fetch_from_db(self.db)
 
             self.cache.put('gabby_plot_ctx', ctx, [])
+
+        ctx.data.apt = None
 
         # We create a great many individual images
         logging.info(f"  Creating image directory: {ctx.img_dir}")

@@ -41,9 +41,6 @@ class MoralDecay(object):
 
         self.decay_hist = decay_hist
 
-        self.resampled = resampled
-        self.derivatives = derivatives
-
         self.Ap_min = Ap_min
         self.Ap_max = Ap_max
         self.dAp = dAp
@@ -67,11 +64,36 @@ class MoralDecay(object):
         self.bins_Ad = np.linspace(Ad_min, Ad_max, self.n_D_bins)
         self.bins_Pd = np.linspace(Pd_min, Pd_max, self.n_D_bins)
 
-        self.mean = self._mean()
+        # FIXME: Square time-domain filters don't have the best
+        # frequency-domain responses, but, meh, works fine.
+        n = 3
+        m = 2*n-1
+        kernel=np.ones(m**2).reshape((m,m))
+        kernel /= np.sum(kernel)
+
+        # FIXME: Triangular(ish) window works a bit better...don't
+        # remember which window function this is and what its OOB
+        # rejection is...also don't care right now.
+        window = np.array(list(range(1, n, 1))+[n]+list(range(n-1, 0, -1)))
+        kernel = np.sqrt(np.outer(window, window))
+        kernel /= np.sum(kernel)
+
+        # FIXME: Let's try a Blackman Harris Window
+        window = np.abs(np.blackman(m))
+        kernel = np.sqrt(np.outer(window, window))
+        kernel /= np.sum(kernel)
+
         self.cdf = self._cdf()
         self.percentiles = self._percentiles()
-        #self.median = self._median(kernel=np.ones(25).reshape((5,5))/25)
-        self.median = self._median()
+        self.median = self._median(kernel=kernel)
+        self.mean = self._mean(kernel=kernel)
+
+        # FIXME: Be nice to use a lowpass rather than median filter
+        # self.mean[0] = scipy.signal.medfilt2d(self.mean[0], kernel_size=5)
+        # self.mean[1] = scipy.signal.medfilt2d(self.mean[1], kernel_size=5)
+        # self.median[0] = scipy.signal.medfilt2d(self.median[0], kernel_size=1)
+        # self.median[1] = scipy.signal.medfilt2d(self.median[1], kernel_size=1)
+
         #self._verify_derivatives()
 
     def index_for(self, A, P):
@@ -126,7 +148,7 @@ class MoralDecay(object):
                     fig.savefig(f"fail-{aidx}-{pidx}.png")
                     #assert(False)
 
-    def _mean(self):
+    def _mean(self, kernel=None):
         """Finds the expectation value for each bin.
 
         At first blush, we don't necessarily care about the full
@@ -141,9 +163,9 @@ class MoralDecay(object):
                 assert(0 >= retval[0][i][j])
                 assert(0 >= retval[1][i][j])
 
-        kernel = np.ones(25).reshape((5,5))
-        retval[0] = scipy.signal.convolve2d(retval[0], kernel, mode='same')
-        retval[1] = scipy.signal.convolve2d(retval[1], kernel, mode='same')
+        if kernel is not None:
+            retval[0] = scipy.signal.convolve2d(retval[0], kernel, mode='same')
+            retval[1] = scipy.signal.convolve2d(retval[1], kernel, mode='same')
 
         return retval
 

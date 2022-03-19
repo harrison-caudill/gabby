@@ -130,7 +130,7 @@ class NumberPlotter(object):
         ax.legend(loc=1)
 
         mkdir_p(self.img_dir)
-        fname = self.tgt.name[4:] + '.png'
+        fname = self.tgt.name[4:] + '-calibration.png'
         fig.savefig(os.path.join(self.img_dir, fname))
 
     def plt_setup(self):
