@@ -66,25 +66,27 @@ class MoralDecay(object):
 
         # FIXME: Square time-domain filters don't have the best
         # frequency-domain responses, but, meh, works fine.
-        kernel=np.ones(25).reshape((5,5)) / 25
+        n = 5
+        m = 2*n-1
+        kernel=np.ones(m**2).reshape((m,m))
+        kernel /= np.sum(kernel)
 
         # FIXME: Triangular(ish) window works a bit better...don't
         # remember which window function this is and what its OOB
         # rejection is...also don't care right now.
-        n = 5
         window = np.array(list(range(1, n, 1))+[n]+list(range(n-1, 0, -1)))
         kernel = np.sqrt(np.outer(window, window))
         kernel /= np.sum(kernel)
 
         # FIXME: Let's try a Blackman Harris Window
-        window = np.abs(np.blackman(2*n-1))
+        window = np.abs(np.blackman(m))
         kernel = np.sqrt(np.outer(window, window))
         kernel /= np.sum(kernel)
 
-        self.mean = self._mean(kernel=kernel)
         self.cdf = self._cdf()
         self.percentiles = self._percentiles()
         self.median = self._median(kernel=kernel)
+        self.mean = self._mean(kernel=kernel)
 
         # FIXME: Be nice to use a lowpass rather than median filter
         #self.mean = self._mean(kernel=np.ones(25).reshape((5,5))/25)
