@@ -35,8 +35,6 @@ class GabbyDataModel(DataModel):
     Vs: NxL indication of which observations are valid
     """
 
-    cache_name = 'gabby_data_model'
-
     def __init__(self, fragments, ts, As, Ps, Ts, Ns, Vs, dt):
         self.fragments = fragments
         self.ts = ts
@@ -56,6 +54,10 @@ class GabbyDataModel(DataModel):
         # In case we're doing forward propagation, we'll need the
         # starting offset for graphing purposes.
         self.fwd_prop_start = None
+
+    @classmethod
+    def cache_name(cls, tgt):
+        return f"gabby-model-{cfg_hash(tgt)}"
 
     @classmethod
     def from_cfg(cls, tgt, db):

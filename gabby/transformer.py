@@ -94,6 +94,50 @@ class Jazz(object):
     def filtered_cache_name(cls, stats_cfg):
         return 'filtered-' + sats_hash(stats_cfg)
 
+    @classmethod
+    def moral_decay_from_cfg(cls, cfg, db, cache=None):
+        stats_cfg = cfg['stats']
+
+        # Start by checking the cache
+        decay_name = MoralDecay.cache_name(stats_cfg)
+        if cache and decay_name in cache:
+            logging.info(f"  Found moral decay in the cache")
+            decay = cache[decay_name]
+            return decay
+
+        logging.info(f"Transformers, more than meets the eye!")
+
+        # Jazz will do all the heavy lifting here
+        jazz = Jazz(cfg)
+
+        # names for cache-lookups
+        filtered_name = Jazz.filtered_cache_name(stats_cfg)
+        deriv_name = Jazz.deriv_cache_name(stats_cfg)
+
+        base_frags = json.loads(stats_cfg['historical-asats'])
+        fragments = db.find_daughter_fragments(base_frags)
+        apt = db.load_apt(fragments)
+
+        if cache and deriv_name in cache:
+            logging.info(f"  Found filtered/derivative values in global cache")
+            deriv = cache[deriv_name]
+            filtered = cache[filtered_name]
+        else:
+            logging.info(f"  Stats not found in cache -- building anew")
+            filtered, deriv = jazz.filtered_derivatives(apt,
+                                                        min_life=1.0,
+                                                        dt=SECONDS_IN_DAY)
+            logging.info(f"  Saving derivatives to cache")
+            cache[deriv_name] = deriv
+            cache[filtered_name] = filtered
+
+        # FIXME: Deal with solar-activity compensation later
+        decay = jazz.decay_rates(apt, filtered, deriv, drag=None)
+        if cache:
+            logging.info(f"  Adding a little moral decay to the cache")
+            cache[decay_name] = decay
+
+        return decay
 
     def filtered_derivatives(self, apt,
                              min_life=1.0,

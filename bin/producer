@@ -40,6 +40,18 @@ if __name__ == '__main__':
                         default='nudol',
                         help='The ASAT to build video for (%(default)s)')
 
+    parser.add_argument('--plot-type', '-T',
+                        metavar='PLOT_TYPE',
+                        action='store',
+                        dest='plot_type',
+                        type=str,
+                        default='gabby',
+                        choices=['gabby',
+                                 'bstar',
+                                 'num',
+                                 'doom'],
+                        help='Which plot type to build (%(default)s)')
+
     parser.add_argument('--num-threads', '-n',
                         metavar='NUM_THREADS',
                         action='store',
@@ -107,7 +119,7 @@ if __name__ == '__main__':
     cfg.read(args.cfg)
 
     # Find the target
-    tgt = cfg['gabby-'+args.tgt]
+    tgt = cfg[f"{args.plot_type}-{args.tgt}"]
 
     # Aaaaaaannnnd ACTION!
     start_d = gabby.parse_date_d(tgt['start-date'])
@@ -118,7 +130,8 @@ if __name__ == '__main__':
     n_digits = len(str(last_idx))
     video_path = os.path.abspath(os.path.join(output_dir,
                                               tgt['video-filename']))
-    img_path = os.path.abspath(os.path.join(output_dir, 'gabby-img'))
+    img_path = os.path.abspath(os.path.join(output_dir,
+                                            f"{args.plot_type}-img"))
 
     # f/s = (d/s) / (d/f)
     framerate = int(tgt.getint('days-per-sec') / plot_period)

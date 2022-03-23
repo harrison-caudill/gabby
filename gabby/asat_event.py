@@ -19,6 +19,9 @@ class ASATEvent(object):
         self.Ps = Ps
         self.Ts = Ts
 
+        self.L = len(names)
+        assert(self.L == len(As) == len(Ps) == len(Ts))
+
     @classmethod
     def cache_name(cls, des):
         m = hashlib.sha256()
@@ -123,11 +126,12 @@ class ASATEvent(object):
         logging.info("  Building Data Model to back propagate to start")
         start_d = ts_to_dt(np.min(start))
         end_d = ts_to_dt(np.max(start) + 1)
+        dt_d = datetime.timedelta(days=10)
         model = GabbyDataModel.from_db(db=db,
                                        des=des,
-                                       start_d=start_d,
+                                       start_d=(incident_d - dt_d),
                                        end_d=end_d,
-                                       dt_d=datetime.timedelta(days=1))
+                                       dt_d=dt_d)
         assert(model.fragments == fragments)
 
         # Done with our DB work
