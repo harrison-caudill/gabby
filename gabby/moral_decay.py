@@ -35,7 +35,7 @@ class MoralDecay(object):
       combination of A/P A and
     """
 
-    def __init__(self, decay_hist, resampled, derivatives,
+    def __init__(self, decay_hist,
                  Ap_min, Ap_max, dAp, Ad_min, Ad_max, dAd,
                  Pp_min, Pp_max, dPp, Pd_min, Pd_max, dPd):
 
@@ -88,65 +88,10 @@ class MoralDecay(object):
         self.median = self._median(kernel=kernel)
         self.mean = self._mean(kernel=kernel)
 
-        # FIXME: Be nice to use a lowpass rather than median filter
-        # self.mean[0] = scipy.signal.medfilt2d(self.mean[0], kernel_size=5)
-        # self.mean[1] = scipy.signal.medfilt2d(self.mean[1], kernel_size=5)
-        # self.median[0] = scipy.signal.medfilt2d(self.median[0], kernel_size=1)
-        # self.median[1] = scipy.signal.medfilt2d(self.median[1], kernel_size=1)
-
-        #self._verify_derivatives()
-
     def index_for(self, A, P):
         idx_A = min(int((A - self.Ap_min) / self.dAp), self.n_A_bins-1)
         idx_P = min(int((P - self.Pp_min) / self.dPp), self.n_P_bins-1)
-        return idx_A, idx_P
-
-    def _verify_derivatives(self):
-        all_deriv = []
-        for aidx in range(self.n_A_bins):
-            for pidx in range(self.n_P_bins):
-                print(f"Checking: {aidx}, {pidx}")
-                dAdt = self.median[0][aidx][pidx]
-                dPdt = self.median[1][aidx][pidx]
-                if not dAdt <= dPdt <= 0:
-                    print(self.bins_Ad)
-                    print(f"A':  {dAdt}")
-                    print(f"P':  {dPdt}")
-                    print(f"Del: {dAdt - dPdt}")
-
-                    # if aidx and pidx and aidx<self.n_A_bins-1 and pidx<self.n_P_bins-1:
-                    #     self.decay_hist[0][aidx][pidx] = (
-                    #         self.decay_hist[0][aidx-1][pidx-1]
-                    #         + self.decay_hist[0][aidx-1][pidx]
-                    #         + self.decay_hist[0][aidx-1][pidx+1]
-                    #         + self.decay_hist[0][aidx][pidx-1]
-                    #         + self.decay_hist[0][aidx][pidx]
-                    #         + self.decay_hist[0][aidx][pidx+1]
-                    #         + self.decay_hist[0][aidx+1][pidx-1]
-                    #         + self.decay_hist[0][aidx+1][pidx]
-                    #         + self.decay_hist[0][aidx+1][pidx+1])/9
-
-                    #     self.decay_hist[1][aidx][pidx] = (
-                    #         self.decay_hist[1][aidx-1][pidx-1]
-                    #         + self.decay_hist[1][aidx-1][pidx]
-                    #         + self.decay_hist[1][aidx-1][pidx+1]
-                    #         + self.decay_hist[1][aidx][pidx-1]
-                    #         + self.decay_hist[1][aidx][pidx]
-                    #         + self.decay_hist[1][aidx][pidx+1]
-                    #         + self.decay_hist[1][aidx+1][pidx-1]
-                    #         + self.decay_hist[1][aidx+1][pidx]
-                    #         + self.decay_hist[1][aidx+1][pidx+1])/9
-
-                    fig = plt.figure(figsize=(12, 8))
-                    fig.suptitle(f"A: {aidx} P: {pidx}")
-                    ax = fig.add_subplot(1, 1, 1)
-                    ax.plot(self.bins_Ad, self.decay_hist[0][aidx][pidx],
-                            label='A')
-                    ax.plot(self.bins_Pd, self.decay_hist[1][aidx][pidx],
-                            label='P')
-                    ax.legend()
-                    fig.savefig(f"fail-{aidx}-{pidx}.png")
-                    #assert(False)
+        return max(idx_A, 0), max(idx_P, 0)
 
     def _mean(self, kernel=None):
         """Finds the expectation value for each bin.
@@ -317,3 +262,8 @@ class MoralDecay(object):
             retval[1] = scipy.signal.convolve2d(retval[1], kernel, mode='same')
 
         return retval
+
+
+    @classmethod
+    def cache_name(cls, stats_cfg):
+        return 'moral_decay-' + cfg_hash(stats_cfg)

@@ -52,14 +52,17 @@ class NumberPlotter(object):
         self.obs_color = self.tgt['observation-color']
         self.prop_color = self.tgt['propagation-color']
 
+        start_d = ts_to_dt(self.data.ts[0])
+        end_d = ts_to_dt(self.data.ts[-1])
+
         # The datetime objects along the x-axis of the plot with the
         # number of fragments.
-        self.Xt = np.arange(self.data.start_d,
-                            self.data.end_d+self.data.dt,
+        self.Xt = np.arange(start_d,
+                            end_d+self.data.dt,
                             self.data.dt)
 
-        self.Xts = np.arange(dt_to_ts(self.data.start_d),
-                             dt_to_ts(self.data.end_d+self.data.dt),
+        self.Xts = np.arange(dt_to_ts(start_d),
+                             dt_to_ts(end_d+self.data.dt),
                              self.data.dt.total_seconds())
 
         # The date on which we start showing forward propagation
@@ -93,7 +96,10 @@ class NumberPlotter(object):
 
         ax = fig.add_subplot(1, 1, 1)
         ax.set_ylabel('Number of Fragments')
-        ax.set_xlim(self.data.start_d, self.data.end_d)
+
+        start_d = ts_to_dt(self.data.ts[0])
+        end_d = ts_to_dt(self.data.ts[-1])
+        ax.set_xlim(start_d, end_d)
         ax.set_ylim(0, self.tgt.getint('max-n-fragments'))
         ax.set_xlabel(self.tgt['copyright'])
 

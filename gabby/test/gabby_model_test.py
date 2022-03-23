@@ -20,7 +20,7 @@ class TestGabbyDataModel(object):
         """
 
         tgt = cfg['gabby-test-2']
-        model = GabbyDataModel(tgt)
+        model = GabbyDataModel.from_cfg(tgt, double_faker.db)
 
         # Verify basic config file ingestion here
         utc = datetime.timezone.utc
@@ -29,12 +29,10 @@ class TestGabbyDataModel(object):
         assert(1 == model.dt.days)
         assert(0 == model.dt.seconds)
 
-        model.fetch_from_db(double_faker.db)
-
         assert(model.L == 2)
         assert(model.N == 10)
 
-        assert(sorted(model.names) == ["99025A", "99025B"])
+        assert(sorted(model.fragments) == ["99025A", "99025B"])
 
         dt = datetime.timedelta(days=1).total_seconds()
         ts = np.arange(dt_to_ts(model.start_d),
@@ -62,7 +60,7 @@ class TestGabbyDataModel(object):
         # numpy array of shape (N, L) and dtype np.int8
         valid = np.ones((10, 2), dtype=np.int8)
         valid[5:,1] = np.zeros(5, dtype=np.int8)
-        assert(np.all(model.valid == valid))
+        assert(np.all(model.Vs == valid))
 
         Ns = np.ones(10) + np.concatenate([np.ones(5), np.zeros(5)])
         assert(np.all(model.Ns == Ns))
@@ -85,8 +83,7 @@ class TestGabbyDataModel(object):
     def test_fetch_from_db(self, cfg):
         db = FakeDB(cfg, cfg['db-gabby-plot-load-from-db'])
         db.build_manual()
-        data = GabbyDataModel(cfg['gabby-test-model'])
-        data.fetch_from_db(db.db)
+        data = GabbyDataModel.from_cfg(cfg['gabby-test-model'], db.db)
 
         assert(np.all(data.As == [[450,   0,   0, 500],
                                   [450, 425,   0, 450],
@@ -98,7 +95,7 @@ class TestGabbyDataModel(object):
                                   [425, 275,   0, 300],
                                   [  0,   0,   0, 0]]))
 
-        assert(np.all(data.valid == [[1, 0, 0, 1],
-                                     [1, 1, 0, 1],
-                                     [1, 1, 0, 1],
-                                     [0, 0, 0, 0]]))
+        assert(np.all(data.Vs == [[1, 0, 0, 1],
+                                  [1, 1, 0, 1],
+                                  [1, 1, 0, 1],
+                                  [0, 0, 0, 0]]))

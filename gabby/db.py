@@ -199,12 +199,14 @@ class GabbyDB(object):
     def find_daughter_fragments(self, base, txn=None):
         """Finds all fragments stemming from the given base.
 
-        base: <str>
+        base: [<str>]
         returns [<str>, ...]
 
         This one is useful for finding daughter fragments after a
         collision.
         """
+
+        assert(isinstance(base, list))
 
         retval = []
         commit, txn = self._txn(txn)
