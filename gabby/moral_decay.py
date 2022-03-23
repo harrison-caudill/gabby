@@ -35,7 +35,7 @@ class MoralDecay(object):
       combination of A/P A and
     """
 
-    def __init__(self, decay_hist, resampled, derivatives,
+    def __init__(self, decay_hist,
                  Ap_min, Ap_max, dAp, Ad_min, Ad_max, dAd,
                  Pp_min, Pp_max, dPp, Pd_min, Pd_max, dPd):
 
@@ -99,7 +99,7 @@ class MoralDecay(object):
     def index_for(self, A, P):
         idx_A = min(int((A - self.Ap_min) / self.dAp), self.n_A_bins-1)
         idx_P = min(int((P - self.Pp_min) / self.dPp), self.n_P_bins-1)
-        return idx_A, idx_P
+        return max(idx_A, 0), max(idx_P, 0)
 
     def _verify_derivatives(self):
         all_deriv = []
@@ -317,3 +317,59 @@ class MoralDecay(object):
             retval[1] = scipy.signal.convolve2d(retval[1], kernel, mode='same')
 
         return retval
+
+
+    @classmethod
+    def cache_name(cls, stats_cfg):
+        return 'moral_decay-' + cfg_hash(stats_cfg)
+
+
+    @classmethod
+    def from_cfg(cls, cfg, db, cache=None):
+        """Loads Moral Decay from the DB
+
+        Just a thin wrapper around the transformer.
+        """
+
+        decay_name = cls.cache_name(cfg)
+        if cache and decay_name in cache:
+            logging.info(f"  Found moral decay in the cache")
+            return cache[decay_name]
+        else:
+            logging.info(f"  Stats not found in cache -- building anew")
+
+        # Jazz will do all the heavy lifting here
+        logging.info(f"Transformers, more than meets the eye!")
+        jazz = Jazz(cfg)
+
+        # names for cache-lookups
+        deriv_name = cls._deriv_cache_name(cfg)
+        filtered_name = filtered_cache_name(cfg)
+        if cache and deriv_name in cache:
+            logging.info(f"  Found filtered/derivative values in global cache")
+            deriv = cache[deriv_name]
+            filtered = cache[filtered_name]
+        else:
+            base_frags = json.loads(cfg['historical-asats'])
+            fragments = db.find_daughter_fragments(base_frags)
+            apt = db.load_apt(fragments)
+
+            filtered, deriv = jazz.filtered_derivatives(apt,
+                                                        min_life=1.0,
+                                                        dt=SECONDS_IN_DAY)
+            if cache:
+                logging.info(f"  Saving derivatives to cache")
+                cache[deriv_name] = deriv
+                cache[filtered_name] = filtered
+
+        logging.info(f"  Cache is free from moral decay, let's make some")
+        # FIXME: Deal with solar-activity compensation later
+        decay = jazz.decay_rates(apt, filtered, deriv, drag=None)
+
+        if cache:
+            logging.info(f"  Adding a little moral decay to the cache")
+            cache[decay_name] = decay
+
+        #decay.plot_mesh('output/mesh.png', data='median')
+        #decay.plot_dA_vs_P('output/avp-%(i)2.2d.png')
+        return decay

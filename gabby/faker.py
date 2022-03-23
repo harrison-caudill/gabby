@@ -139,7 +139,7 @@ class FakeDB(object):
             T = self._T(A, P)
             self._fill_apt(des[i], zip(t, A, P, T))
 
-    def build_manual(self):
+    def build_manual(self, des=None, t=None, A=None, P=None, T=None):
         """Builds and stores the tAPT values specified in the config.
 
         It'll use the A and P to compute T.
@@ -151,10 +151,11 @@ class FakeDB(object):
           * manual-P
         """
 
-        des = json.loads(self.tgt['manual-intldes'])
-        t = json.loads(self.tgt['manual-t'])
-        A = json.loads(self.tgt['manual-A'])
-        P = json.loads(self.tgt['manual-P'])
+        if not (des and t and A and P and T):
+            des = json.loads(self.tgt['manual-intldes'])
+            t = json.loads(self.tgt['manual-t'])
+            A = json.loads(self.tgt['manual-A'])
+            P = json.loads(self.tgt['manual-P'])
 
         L = len(des)
 

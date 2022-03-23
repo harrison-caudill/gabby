@@ -26,65 +26,84 @@ from .cache import GabbyCache
 
 class GabbyDataModel(DataModel):
     """Raw data employed by the Gabby Plotter.
+
+    Data is contained within NxL Numpy Arrays of type float32.
+    ts: timestamps of the frame
+    As: Apogee
+    Ps: Perigee
+    Ts: Period
+    Ns: Array of length N indicating how many fragments are valid in that frame
+    Vs: NxL indication of which observations are valid
     """
 
     cache_name = 'gabby_data_model'
 
-    def __init__(self, tgt, tgt_cache=None):
+    def __init__(self, fragments, ts, As, Ps, Ts, Ns, Vs, dt):
+        #dt, scope_start, scope_end):
+        self.fragments = fragments
+        self.ts = ts
+        self.As = As
+        self.Ps = Ps
+        self.Ts = Ts
+        self.Ns = Ns
+        self.Vs = Vs
+        self.dt = dt
+        #self.scope_start = scope_start
+        #self.scope_end = scope_end
 
-        self.tgt = tgt
-
-        # The list of base satellites who's daughters are to be
-        # tracked.  It has to be a list so that we can handle
-        # collisions and intentional detonations.
-        self.target_des = json.loads(self.tgt['intldes'])
-
-        # Mask off the original rocket body, as it's a distraction
-        self.mask = json.loads(self.tgt['mask']) if 'mask' in self.tgt else None
-
-        # Pull in the time boundaries from the config file
-        self.start_d = parse_date_d(self.tgt['start-date'])
-        self.end_d = parse_date_d(self.tgt['end-date'])
-        self.incident_d = parse_date_d(self.tgt['incident'])
-
-        # Time step between images
-        self.dt = datetime.timedelta(days=self.tgt.getint('plot-period'))
+        self.N = len(ts)
+        self.L = len(As[0])
 
         # In case we're doing forward propagation, we'll need the
         # starting offset for graphing purposes.
         self.fwd_prop_start = None
 
-    def fetch_from_db(self, db):
+    @classmethod
+    def from_cfg(cls, tgt, db):
+        # The list of base satellites who's daughters are to be
+        # tracked.  It has to be a list so that we can handle
+        # collisions and intentional detonations.
+        target_des = json.loads(tgt['intldes'])
+
+        # Pull in the time boundaries from the config file
+        start_d = parse_date_d(tgt['start-date'])
+        end_d = parse_date_d(tgt['end-date'])
+
+        # Time step between images
+        dt = datetime.timedelta(days=tgt.getint('plot-period'))
+
+        return cls.from_db(db=db, des=target_des,
+                           start_d=start_d, end_d=end_d, dt_d=dt)
+
+    @classmethod
+    def from_db(cls,
+                db=None,
+                des=None,
+                start_d=None, end_d=None, dt_d=None):
         """Loads the data from the database.
         """
-
-        # First, find when pieces come into scope and when they go out
-        self.scope_start, self.scope_end = db.load_scope(self.target_des)
 
         # Slightly redundant, but doing it this way ensures that the
         # order of the fragments is the same that everybody else will
         # be using.
-        self.names = fragments = db.find_daughter_fragments(self.target_des)
+        fragments = db.find_daughter_fragments(des)
 
         # CloudDescriptor with the APT values
-        apt = self.apt = db.load_apt(fragments)
+        apt = db.load_apt(fragments)
 
         # Get our array dimensions
-        L = self.L = len(fragments)
-        N = self.N = int(math.ceil((self.end_d - self.start_d)/self.dt))+1
-
-        # For propagation purposes, it's nice to know the first and
-        # last observation.  This will hold the index into the array
-        # of the first and last entries.
-        boundaries = self.boundaries = np.zeros((self.L, 2), dtype=int)
+        L = len(fragments)
+        N = int(math.ceil((end_d - start_d)/dt_d))+1
 
         # Get the integer timestamps to use for indexing
-        self.start_ts = start_ts = dt_to_ts(self.start_d)
-        self.incident_ts = incident_ts = dt_to_ts(self.incident_d)
-        self.end_ts = end_ts = dt_to_ts(self.end_d)
+        start_ts = dt_to_ts(start_d)
+        end_ts = dt_to_ts(end_d)
 
         # Time delta between gabby frames in seconds
-        dt_s = int(self.dt.total_seconds())
+        dt_s = int(dt_d.total_seconds())
+
+        # Load scope
+        #scope_start, scope_end = db.load_scope(des)
 
         # Linear array of timestamps, one for each frame
         srch_ts = np.arange(start_ts, end_ts+dt_s, dt_s, dtype=int)
@@ -99,10 +118,10 @@ class GabbyDataModel(DataModel):
 
         logging.info(f"  L: {L} fragments")
         logging.info(f"  N: {N} gabby frames")
-        logging.info(f"  Start:    {self.start_d}")
-        logging.info(f"  Incident: {self.end_d}")
-        logging.info(f"  End:      {self.end_d}")
+        logging.info(f"  Start:    {start_d}")
+        logging.info(f"  End:      {end_d}")
         logging.info(f"  ")
+
 
         # Before and after values for the timestamp and Apogee/Perigee
         before_ts = np.zeros((N, L), dtype=np.int32)
@@ -121,27 +140,41 @@ class GabbyDataModel(DataModel):
 
         bounds = np.zeros((L, 2), dtype=np.int32)
 
+        # FIXME: Turns out that the Fengyun debris contains 3 negative
+        # values for 99025CKQ, 99025MB, and 99025WC.  I should
+        # probably pre-filter the DB to eliminate negative values.  In
+        # the meantime, I can clip them.
+        for i in range(L):
+            for j in range(apt.N[i]):
+                if apt.P[i][j] < 0:
+                    print(f"Fragment: {apt.fragments[i]}")
+                    print(f"Index: {j}")
+                    print(f"Date: {ts_to_dt(apt.t[i][j])}")
+
+        apt.A = np.clip(apt.A, 0, None)
+        apt.P = np.clip(apt.P, 0, None)
+
         # The big main loop
         for frag_idx in range(L):
             frag = fragments[frag_idx]
-            logging.info(f"    Fetching data for {frag} ({frag_idx+1}/{L})")
+            logging.info(f"    Finding straddling points for {frag} ({frag_idx+1}/{L})")
 
             # Number of observations for this fragment
-            n_frag_obs = self.apt.N[frag_idx]
+            n_frag_obs = apt.N[frag_idx]
 
             # If we only have one observation, there's no point in
             # using it.
             if 2 > n_frag_obs: continue
 
             # tAPT observations for this fragment
-            frag_t = self.apt.t[frag_idx][:n_frag_obs]
-            frag_A = self.apt.A[frag_idx][:n_frag_obs]
-            frag_P = self.apt.P[frag_idx][:n_frag_obs]
-            frag_T = self.apt.T[frag_idx][:n_frag_obs]
+            frag_t = apt.t[frag_idx][:n_frag_obs]
+            frag_A = apt.A[frag_idx][:n_frag_obs]
+            frag_P = apt.P[frag_idx][:n_frag_obs]
+            frag_T = apt.T[frag_idx][:n_frag_obs]
 
-            # print("==============================")
-            # print(f"Fragment Timestamps: {frag_t}")
-            # print(f"Search Timestamps:   {srch_ts}")
+            print("==============================")
+            print(f"Fragment Timestamps: {frag_t}")
+            print(f"Search Timestamps:   {srch_ts}")
 
             # There are 9 options for the first observation of
             # consequence A-I are the options, and R is the
@@ -162,8 +195,6 @@ class GabbyDataModel(DataModel):
             # H), we can just skip it.
             if frag_t[-1] <= srch_ts[0]: continue # Option A/B
             if frag_t[0] >= srch_ts[-1]: continue # Option H/I
-
-            # print(f"Fragment is in scope")
 
             # Now we only need consider the non-zero intersection
             # sets:
@@ -198,9 +229,9 @@ class GabbyDataModel(DataModel):
             idx_before = np.searchsorted(frag_t, cmp_high_ts) - 1
             idx_eq = np.searchsorted(frag_t, srch_ts)
 
-            # print(f"Index Before:        {idx_before}")
-            # print(f"Index Equal:         {idx_eq}")
-            # print(f"Diff:                {np.diff(idx_eq)}")
+            print(f"Index Before:        {idx_before}")
+            print(f"Index Equal:         {idx_eq}")
+            print(f"Diff:                {np.diff(idx_eq)}")
 
             a = np.searchsorted(idx_before, -1, side='right')
             b = np.searchsorted(idx_eq, n_frag_obs, side='left')
@@ -213,7 +244,7 @@ class GabbyDataModel(DataModel):
 
                 before = idx_before[gabby_idx]
                 after = idx_eq[gabby_idx]
-                # print(f"Range[{gabby_idx}]: {before} - {after}")
+                print(f"Range[{gabby_idx}]: {before} - {after}")
 
                 assert(frag_t[before] <= srch_ts[gabby_idx])
                 assert(frag_t[after] >= srch_ts[gabby_idx])
@@ -242,6 +273,14 @@ class GabbyDataModel(DataModel):
         pct_before = np.where(np.abs(pct_before) == math.inf, 0, pct_before)
         pct_after = np.where(np.abs(pct_after) == math.inf, 0, pct_after)
 
+        assert(np.all(pct_before >= 0))
+        assert(np.all(pct_after >= 0))
+        assert(np.all(before_A >= 0))
+        assert(np.all(after_A >= 0))
+        assert(np.all(before_P >= 0))
+        assert(np.all(after_P >= 0))
+
+
         logging.info(f"  Interpolating Values")
         A = np.zeros((N, L), dtype=np.float32)
         P = np.zeros((N, L), dtype=np.float32)
@@ -250,7 +289,9 @@ class GabbyDataModel(DataModel):
             a = bounds[frag_idx][0]
             b = bounds[frag_idx][1]
 
+            print(f"    Validating {fragments[frag_idx]}: {a}-{b}")
             valid[a:b,frag_idx] = 1
+            print(valid[:,frag_idx])
 
             before = before_A[a:b, frag_idx] * pct_before[a:b, frag_idx]
             after = after_A[a:b, frag_idx] * pct_after[a:b, frag_idx]
@@ -264,15 +305,18 @@ class GabbyDataModel(DataModel):
             after = after_T[a:b, frag_idx] * pct_after[a:b, frag_idx]
             T[a:b, frag_idx] = before + after
 
+        print("================================")
+        print(valid[:,0])
+        print(valid[:,1])
+        print(valid[:,2])
+        print(valid[:,3])
+        print(valid)
+        print("================================")
+
         t = srch_ts
         Ns = np.sum(valid, axis=1, dtype=np.int64)
 
-        logging.info(f"  Registering the resulting data")
-        self.ts = t
-        self.As = A
-        self.Ps = P
-        self.Ts = T
-        self.Ns = Ns
-        self.valid = valid
+        logging.info(f"  We win!")
 
-
+        return GabbyDataModel(fragments, t, A, P, T, Ns, valid,
+                              dt_d)#, scope_start, scope_end)

@@ -53,10 +53,8 @@ class Jazz(object):
     """Finds Moral Decay in the data.
     """
 
-    def __init__(self, cfg, global_cache=None, tgt_cache=None):
+    def __init__(self, cfg):
         self.cfg = cfg
-        self.global_cache = global_cache
-        self.tgt_cache = tgt_cache
 
     def resample(self, X, Y, dx, sub='linear'):
         """Resamples the aperiodic signal to periodic sampling.
@@ -85,6 +83,17 @@ class Jazz(object):
         fltr = (1/k) * np.sinc(fltr)
         fltr /= np.sum(fltr)
         return fltr
+
+
+    @classmethod
+    def deriv_cache_name(cls, stats_cfg):
+        return 'deriv-' + sats_hash(stats_cfg)
+
+
+    @classmethod
+    def filtered_cache_name(cls, stats_cfg):
+        return 'filtered-' + sats_hash(stats_cfg)
+
 
     def filtered_derivatives(self, apt,
                              min_life=1.0,
@@ -528,7 +537,7 @@ class Jazz(object):
         # FIXME: Any normalization steps for things like B* compared
         # to mean would happen at this stage.
 
-        return MoralDecay(moral_decay, resampled, deriv,
+        return MoralDecay(moral_decay,
                           Ap_min, Ap_max, dAp, Ad_min, Ad_max, dAd,
                           Pp_min, Pp_max, dPp, Pd_min, Pd_max, dPd)
 

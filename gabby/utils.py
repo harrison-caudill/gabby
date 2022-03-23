@@ -1,5 +1,7 @@
 import astropy
 import datetime
+import hashlib
+import json
 import lmdb
 import logging
 import matplotlib.pyplot as plt
@@ -20,6 +22,7 @@ def mkdir_p(path):
     if not os.path.isdir(path):
         logging.debug('Creating Directory: %s' % path)
         os.makedirs(path)
+
 
 def setup_logging(log_file='output/gab.log', log_level='info'):
     """Gets the logging infrastructure up and running.
@@ -81,6 +84,7 @@ def time_command(f, msg):
         ms = int((end - start)*1000)
         logging.info("  Call completed in {ms}ms")
 
+
 def plot_apt(frag, tapt, path):
     fig = plt.figure(figsize=(12, 8))
     fig.set_dpi(300)
@@ -128,3 +132,19 @@ def keplerian_period(A, P):
     T = 2 * np.pi * (a**3/mu)**.5 / 60.0
 
     return T
+
+
+def cfg_hash(cfg):
+    tmp = dict(cfg.items())
+
+    vals = [(k, tmp[k]) for k in sorted(tmp.keys())]
+    m = hashlib.sha256()
+    m.update(str(vals).encode())
+    return m.hexdigest()
+
+
+def sats_hash(cfg):
+    sats = json.loads(cfg['historical-asats'])
+    m = hashlib.sha256()
+    m.update((','.join(sorted(sats))).encode())
+    return m.hexdigest()
