@@ -11,7 +11,6 @@ import multiprocessing
 import numpy as np
 import os
 import pickle
-import pprint
 import subprocess
 import struct
 import sys
@@ -39,7 +38,6 @@ class GabbyDataModel(DataModel):
     cache_name = 'gabby_data_model'
 
     def __init__(self, fragments, ts, As, Ps, Ts, Ns, Vs, dt):
-        #dt, scope_start, scope_end):
         self.fragments = fragments
         self.ts = ts
         self.As = As
@@ -48,8 +46,6 @@ class GabbyDataModel(DataModel):
         self.Ns = Ns
         self.Vs = Vs
         self.dt = dt
-        #self.scope_start = scope_start
-        #self.scope_end = scope_end
 
         self.start_d = ts_to_dt(ts[0])
         self.end_d = ts_to_dt(ts[-1])
@@ -143,17 +139,10 @@ class GabbyDataModel(DataModel):
 
         bounds = np.zeros((L, 2), dtype=np.int32)
 
-        # FIXME: Turns out that the Fengyun debris contains 3 negative
+        # NOTE: Turns out that the Fengyun debris contains 3 negative
         # values for 99025CKQ, 99025MB, and 99025WC.  I should
         # probably pre-filter the DB to eliminate negative values.  In
         # the meantime, I can clip them.
-        # for i in range(L):
-        #     for j in range(apt.N[i]):
-        #         if apt.P[i][j] < 0:
-        #             print(f"Fragment: {apt.fragments[i]}")
-        #             print(f"Index: {j}")
-        #             print(f"Date: {ts_to_dt(apt.t[i][j])}")
-
         apt.A = np.clip(apt.A, 0, None)
         apt.P = np.clip(apt.P, 0, None)
 
@@ -174,10 +163,6 @@ class GabbyDataModel(DataModel):
             frag_A = apt.A[frag_idx][:n_frag_obs]
             frag_P = apt.P[frag_idx][:n_frag_obs]
             frag_T = apt.T[frag_idx][:n_frag_obs]
-
-            # print("==============================")
-            # print(f"Fragment Timestamps: {frag_t}")
-            # print(f"Search Timestamps:   {srch_ts}")
 
             # There are 9 options for the first observation of
             # consequence A-I are the options, and R is the
@@ -232,22 +217,15 @@ class GabbyDataModel(DataModel):
             idx_before = np.searchsorted(frag_t, cmp_high_ts) - 1
             idx_eq = np.searchsorted(frag_t, srch_ts)
 
-            # print(f"Index Before:        {idx_before}")
-            # print(f"Index Equal:         {idx_eq}")
-            # print(f"Diff:                {np.diff(idx_eq)}")
-
             a = np.searchsorted(idx_before, -1, side='right')
             b = np.searchsorted(idx_eq, n_frag_obs, side='left')
             bounds[frag_idx][0] = a
             bounds[frag_idx][1] = b
-            # print(f"a:                   {a}")
-            # print(f"b:                   {b}")
 
             for gabby_idx in range(a, b, 1):
 
                 before = idx_before[gabby_idx]
                 after = idx_eq[gabby_idx]
-                # print(f"Range[{gabby_idx}]: {before} - {after}")
 
                 assert(frag_t[before] <= srch_ts[gabby_idx])
                 assert(frag_t[after] >= srch_ts[gabby_idx])

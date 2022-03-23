@@ -12,7 +12,6 @@ import multiprocessing
 import numpy as np
 import os
 import pickle
-import pprint
 import scipy
 import scipy.interpolate
 import scipy.signal
@@ -189,26 +188,7 @@ class StatsPropagator(object):
                     data.Ts[:,i] = retval[t].Ts[:,i]
                     data.Vs[:,i] = retval[t].Vs[:,i]
 
-            # for j in range(ctx.L):
-            #     # Make sure it's valid at the beginning
-            #     if (not data.Vs[ctx.incident_idx][j]
-            #         and np.sum(data.Vs[:,j]) > ctx.incident_idx):
-            #         print(f"  Missing: {j} starting at {ctx.incident_idx}")
-            #         print(data.Vs[:,j])
-            #         print(ctx.incident_idx)
-            #         assert(data.Vs[ctx.incident_idx][j])
-
             data.Ns = np.sum(ctx.Vs, axis=1, dtype=np.int64)
-
-            # for i in range(ctx.incident_idx, ctx.N-3, 1):
-            #     if data.Ns[i+1] > data.Ns[i]:
-            #         print(data.Ns[i], data.Ns[i+1])
-            #         pprint.pprint(list(data.Vs[i,:]))
-            #         pprint.pprint(list(data.Vs[i+1,:]))
-            #         sys.exit(0)
-
-            # sys.exit(0)
-
 
         else:
             ctx.indexes = list(range(ctx.L))
@@ -365,5 +345,3 @@ class StatsPropagator(object):
                     ctx.Ts[i-1][j] = keplerian_period(ctx.As[i-1][j],
                                                       ctx.Ps[i-1][j])
                     ctx.Vs[i-1][j] = 1
-                    # assert(ctx.Vs[i][j])
-                    # assert(ctx.Vs[i-1][j])
