@@ -272,7 +272,8 @@ if __name__ == '__main__':
 
             prop = gabby.StatsPropagator.from_config(cfg, db, global_cache)
             after_obs = tgt.getboolean('prop-after-observation')
-            prop.propagate(data, gabby.parse_date_d(tgt['incident']),
+            prop.propagate(data,
+                           gabby.parse_date_d(tgt['incident']),
                            rev=tgt.getboolean('rev-prop'),
                            prop_after_obs=after_obs,
                            n_threads=args.n_threads)
