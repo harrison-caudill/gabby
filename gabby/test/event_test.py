@@ -28,8 +28,8 @@ class TestEvent(object):
 
         assert(event.As[0] == 450)
         assert(abs(event.As[1] - 850) < 5)
-        assert(event.As[2] == 450)
+        assert(event.As[2] == 400)
 
         assert(event.Ps[0] == 425)
         assert(abs(event.Ps[1] - 850) < 5)
-        assert(event.Ps[2] == 450)
+        assert(event.Ps[2] == 400)

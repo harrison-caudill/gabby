@@ -86,8 +86,8 @@ def static_decay():
     Ap_max = 10000
     dAp = (Ap_max - Ap_min) / 2
 
-    Ad_min = 0
-    Ad_max = 0
+    Ad_min = -50
+    Ad_max = -50
     dAd = (Ad_max - Ad_min) / 2
 
     Pp_min = 0
@@ -95,7 +95,7 @@ def static_decay():
     dPp = (Pp_max - Pp_min) / 2
 
     Pd_min = -50
-    Pd_max = -100
+    Pd_max = -50
     dPd = (Pd_max - Pd_min) / 2
 
     return MoralDecay(decay_hist,

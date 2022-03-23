@@ -184,9 +184,6 @@ class StatsPropagator(object):
             # Recombine the results
             for t in range(n_threads):
                 for i in work[t].indexes:
-                    # if i == 1594:
-                    #     print(f"  Pulling validity from thread {t}")
-                    #     print(retval[t].Vs[:,i])
                     data.As[:,i] = retval[t].As[:,i]
                     data.Ps[:,i] = retval[t].Ps[:,i]
                     data.Ts[:,i] = retval[t].Ts[:,i]

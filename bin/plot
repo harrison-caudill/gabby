@@ -234,8 +234,7 @@ if __name__ == '__main__':
             data = tgt_cache[cache_name]
         else:
             logging.info(f"  No joy in the cache. Building data model")
-            data = gabby.GabbyDataModel(tgt)
-            data.fetch_from_db(db)
+            data = gabby.GabbyDataModel.from_cfg(tgt, db)
             tgt_cache[cache_name] = data
 
         if tgt.getboolean('fwd-prop'):

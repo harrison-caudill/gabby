@@ -135,7 +135,7 @@ class ASATEvent(object):
         txn = None
 
         # Build the stats propagator
-        stat = StatsPropagator(moral_decay, decay_alt)
+        stat = StatsPropagator(moral_decay)
 
         # Back propagate all of the fragments to the incident date so
         # we have the expected initial conditions.
@@ -147,6 +147,8 @@ class ASATEvent(object):
         # suffer from premature plasmafication.
         L -= np.sum(early_to_bed)
 
+        incident_idx = np.searchsorted(model.ts, dt_to_ts(incident_d))
+
         # Now that we've back-propagated to the beginning, we should
         # have valid observations for inital conditions of all the
         # fragments.
@@ -157,9 +159,9 @@ class ASATEvent(object):
         for i in range(model.L):
             if early_to_bed[i]: continue
             rFragments.append(fragments[i])
-            rA.append(model.As[0][i])
-            rP.append(model.Ps[0][i])
-            rT.append(model.Ts[0][i])
+            rA.append(model.As[incident_idx][i])
+            rP.append(model.Ps[incident_idx][i])
+            rT.append(model.Ts[incident_idx][i])
 
         retval = ASATEvent(rFragments,
                            np.array(rA),
