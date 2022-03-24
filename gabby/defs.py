@@ -169,4 +169,6 @@ def ts_to_dt(ts):
     The ts CANNOT be negative.
     """
     assert(0 <= ts)
-    return EPOCH + datetime.timedelta(seconds=int(ts))
+    retval = EPOCH + datetime.timedelta(seconds=int(ts))
+    assert(retval >= EPOCH)
+    return retval

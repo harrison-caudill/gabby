@@ -244,9 +244,13 @@ if __name__ == '__main__':
 
             prop = gabby.StatsPropagator.from_config(cfg, db, global_cache)
             after_obs = tgt.getboolean('prop-after-observation')
+            prop_start = None
+            if 'fwd-prop-start-date' in tgt:
+                prop_start = gabby.parse_date_d(tgt['fwd-prop-start-date'])
             prop.propagate(data,
                            gabby.parse_date_d(tgt['incident']),
                            rev=tgt.getboolean('rev-prop'),
+                           prop_start=prop_start,
                            prop_after_obs=after_obs,
                            n_threads=args.n_threads)
 

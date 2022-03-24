@@ -38,7 +38,8 @@ class Propagator(object):
 class StatsPropagatorContext(object):
 
     def __init__(self, prop, data, fwd, rev,
-                 prop_after_obs, decay_alt, drop_early, incident_ts):
+                 prop_after_obs, decay_alt, drop_early,
+                 incident_ts, prop_start_ts):
 
         self.fwd = fwd
         self.rev = rev
@@ -57,10 +58,17 @@ class StatsPropagatorContext(object):
         self.start_ts = data.ts[0]
         self.names = data.fragments
         self.decay = prop.decay
+        self.prop_start_ts = prop_start_ts
+        self.Ds = np.zeros(self.Vs.shape, dtype=np.int8) # Decayed
 
         self.decay_alts = np.zeros(self.L) + decay_alt
 
         self.incident_idx = np.searchsorted(data.ts, incident_ts)
+        if prop_start_ts is not None:
+            self.prop_start_idx = np.searchsorted(data.ts, prop_start_ts)
+        else:
+            # Never hit this
+            prop_start_idx = self.N + 1
 
         # If we're dropping them before they fully decay, then we'll
         # want to first find the altitude of the last observation.
@@ -96,6 +104,7 @@ class StatsPropagator(object):
                   drop_early=False,
                   fwd=True,
                   rev=True,
+                  prop_start=None,
                   prop_after_obs=False,
                   n_threads=1,
                   decay_alt=200):
@@ -112,9 +121,12 @@ class StatsPropagator(object):
         logging.info(f"Propagating")
 
         incident_ts = dt_to_ts(incident_d)
+        prop_start_ts = None
+        if prop_start: prop_start_ts = dt_to_ts(prop_start)
 
         ctx = StatsPropagatorContext(self, data, fwd, rev, prop_after_obs,
-                                     decay_alt, drop_early, incident_ts)
+                                     decay_alt, drop_early, incident_ts,
+                                     prop_start_ts)
 
         data.Ns_obs = data.Ns
 
@@ -179,18 +191,29 @@ class StatsPropagator(object):
 
     @classmethod
     def _fwd_propagate_fragment(cls, ctx):
+
+
         thread_n = ctx.indexes[0]
         fwd_prop_start = None
+        #decayed = np.zeros(ctx.As.shape[1], dtype=np.int8)
         for i in range(ctx.N-1):
             print(f"  Fwd Propagate:{i+1}/{ctx.N} Thread:{thread_n}")
             for j in ctx.indexes:
-                frag = ctx.names[j]
                 A = ctx.As[i][j]
                 P = ctx.Ps[i][j]
 
-                do_prop = (A
-                           and (not ctx.As[i+1][j] or ctx.prop_after_obs)
-                           and ctx.fwd)
+                # print(f"Trying: {i}, {j}")
+
+                # print(f"P[{i}][{j}] = {P} ({ctx.Vs[i][j]})")
+
+                # if P and P <= 200:
+                #     print(f"DECAY???  P:{P} V:{ctx.Vs[i][j]}")
+
+                do_prop = (ctx.Vs[i][j] # Do we have a valid starting point
+                           and (not ctx.Vs[i+1][j]
+                                or ctx.prop_after_obs
+                                or i >= ctx.prop_start_idx))
+
                 if do_prop:
                     # Register the index of the first forward-predicted frame
                     if fwd_prop_start is None: fwd_prop_start = i+1
@@ -201,10 +224,20 @@ class StatsPropagator(object):
                     # The perigee is already at or below the decay
                     # altitude, so we're going to drop it off the map
                     # now.
+                    #print(f"WAAAAT {P} {ctx.decay_alts[j]}")
                     if P <= ctx.decay_alts[j]:
-                        # ctx.scope_end[frag] = ctx.ts[i]
-                        ctx.Vs[i+1:,j] = 0
+                        # print("DECAAAYYYYYYEEEED")
+                        # print(f"  P:{P} V:{ctx.Vs[i][j]}")
+                        # print(f"  Invalidating: [{i}:][{j}]")
+                        ctx.Vs[i:,j] = 0
+                        ctx.As[i:,j] = 0
+                        ctx.Ps[i:,j] = 0
+                        ctx.Ts[i:,j] = 0
+                        #decayed[j] = 1
                         continue
+
+                    # Ensure we trigger next frame
+                    ctx.Vs[i+1][j] = 1
 
                     # Find the indexes into the tables
                     idx_A, idx_P = ctx.decay.index_for(A, P)
@@ -214,6 +247,9 @@ class StatsPropagator(object):
                     # Find the decay rates (dA/dt and dP/dt)
                     rate_A = dat[0][idx_A][idx_P]
                     rate_P = dat[1][idx_A][idx_P]
+
+                    #rate_A, rate_P = ctx.decay.rates(dat, A, P)
+
                     if abs(rate_P) > abs(rate_A):
                         # FIXME: This is a problem with Moral Decay.
                         # Sometimes the perigee decay rate exceeds the
@@ -244,11 +280,10 @@ class StatsPropagator(object):
 
                     ctx.Ts[i+1][j] = keplerian_period(ctx.As[i+1][j],
                                                       ctx.Ps[i+1][j])
-                    ctx.Vs[i+1][j] = 1
 
-            # Annotate the beginning of forward propagation
-            ctx.fwd_prop_start = fwd_prop_start
-
+        # Annotate the beginning of forward propagation
+        ctx.fwd_prop_start = fwd_prop_start
+        #print(f"==============> {len(decayed)} - {np.sum(decayed)}")
 
     @classmethod
     def _rev_propagate_fragment(cls, ctx):

@@ -139,6 +139,9 @@ class DoomsdayPlotter(object):
         l = 0 # Current index into the fragments of the model
         fragments = []
         for idx, evt in q:
+            print(f"Adding at time index {idx} fragment index {l}")
+            #idx = 0
+            #evt = events[0]
             dl = evt.L
             As[idx,l:l+dl] = evt.As
             Ps[idx,l:l+dl] = evt.Ps
@@ -148,6 +151,7 @@ class DoomsdayPlotter(object):
 
             # FIXME: Consider adding new namespaces for these
             fragments += evt.names
+            #break
 
         assert(l == L)
         model = GabbyDataModel(fragments, ts, As, Ps, Ts, Ns, Vs, dt)

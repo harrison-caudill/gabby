@@ -129,7 +129,7 @@ class ASATEvent(object):
         dt_d = datetime.timedelta(days=10)
         model = GabbyDataModel.from_db(db=db,
                                        des=des,
-                                       start_d=(incident_d - dt_d),
+                                       start_d=incident_d,
                                        end_d=end_d,
                                        dt_d=dt_d)
         assert(model.fragments == fragments)

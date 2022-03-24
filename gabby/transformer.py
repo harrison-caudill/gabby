@@ -103,6 +103,8 @@ class Jazz(object):
         if cache and decay_name in cache:
             logging.info(f"  Found moral decay in the cache")
             decay = cache[decay_name]
+            decay.plot_mesh('output/mesh-A.png', axis='A')
+            decay.plot_mesh('output/mesh-P.png', axis='P')
             return decay
 
         logging.info(f"Transformers, more than meets the eye!")
@@ -126,7 +128,8 @@ class Jazz(object):
             logging.info(f"  Stats not found in cache -- building anew")
             filtered, deriv = jazz.filtered_derivatives(apt,
                                                         min_life=1.0,
-                                                        dt=SECONDS_IN_DAY)
+                                                        dt=SECONDS_IN_DAY,
+                                                        fltr=jazz.lpf())
             logging.info(f"  Saving derivatives to cache")
             cache[deriv_name] = deriv
             cache[filtered_name] = filtered

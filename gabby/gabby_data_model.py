@@ -87,7 +87,7 @@ class GabbyDataModel(DataModel):
         # Slightly redundant, but doing it this way ensures that the
         # order of the fragments is the same that everybody else will
         # be using.
-        fragments = db.find_daughter_fragments(des)
+        fragments = sorted(db.find_daughter_fragments(des))
 
         # CloudDescriptor with the APT values
         apt = db.load_apt(fragments)
@@ -97,6 +97,7 @@ class GabbyDataModel(DataModel):
         N = int(math.ceil((end_d - start_d)/dt_d))+1
 
         # Get the integer timestamps to use for indexing
+        print(start_d)
         start_ts = dt_to_ts(start_d)
         end_ts = dt_to_ts(end_d)
 
