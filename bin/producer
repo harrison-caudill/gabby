@@ -134,7 +134,7 @@ if __name__ == '__main__':
                                             f"{args.plot_type}-img"))
 
     # f/s = (d/s) / (d/f)
-    framerate = int(tgt.getint('days-per-sec') / plot_period)
+    framerate = max(int(tgt.getint('days-per-sec') / plot_period), 1)
 
     cmd = [
         'ffmpeg',

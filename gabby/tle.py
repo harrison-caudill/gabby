@@ -98,6 +98,10 @@ class TLE(object):
         self.rev_num = rev_num
         self.name = name
 
+    @property
+    def T(self):
+        return datetime.timedelta(days=1) / self.n
+
     def to_sgp4(self):
         """Produces an initialized Satrec object for Brandon's SGP4 package.
 

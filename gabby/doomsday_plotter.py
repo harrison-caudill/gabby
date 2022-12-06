@@ -117,10 +117,12 @@ class DoomsdayPlotter(object):
         events = self._load_events(n_threads=n_threads)
         indexes = self._sample()
 
+        dt_s = int(self.dt.total_seconds())
         ts = np.arange(dt_to_ts(self.start_d),
-                       dt_to_ts(self.end_d),
-                       int(self.dt.total_seconds()))
+                       dt_to_ts(self.end_d) + dt_s,
+                       dt_s)
         N = len(ts)
+        assert(N == self.N)
 
         # determine the ordering of events
         q = []
@@ -140,8 +142,6 @@ class DoomsdayPlotter(object):
         fragments = []
         for idx, evt in q:
             print(f"Adding at time index {idx} fragment index {l}")
-            #idx = 0
-            #evt = events[0]
             dl = evt.L
             As[idx,l:l+dl] = evt.As
             Ps[idx,l:l+dl] = evt.Ps
@@ -151,7 +151,6 @@ class DoomsdayPlotter(object):
 
             # FIXME: Consider adding new namespaces for these
             fragments += evt.names
-            #break
 
         assert(l == L)
         model = GabbyDataModel(fragments, ts, As, Ps, Ts, Ns, Vs, dt)
@@ -176,4 +175,5 @@ class DoomsdayPlotter(object):
         samp_rate = self.tgt.getfloat('frequency')
         n = math.floor(samp_rate * (self.end_d - self.start_d).days / 365.0)
         if self.rs.choice([True, False]): n += 1
-        return np.sort(self.rs.choice(range(self.N), n))
+        retval = np.sort(self.rs.choice(range(self.N), n))
+        return retval

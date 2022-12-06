@@ -68,7 +68,7 @@ class StatsPropagatorContext(object):
             self.prop_start_idx = np.searchsorted(data.ts, prop_start_ts)
         else:
             # Never hit this
-            prop_start_idx = self.N + 1
+            self.prop_start_idx = self.N + 1
 
         # If we're dropping them before they fully decay, then we'll
         # want to first find the altitude of the last observation.
