@@ -132,7 +132,8 @@ if __name__ == '__main__':
                         default='gabby',
                         choices=['gabby',
                                  'bstar',
-                                 'num'],
+                                 'num',
+                                 'doom'],
                         help='Which plot type to build (%(default)s)')
 
     parser.add_argument('--num-threads', '-n',
@@ -228,25 +229,30 @@ if __name__ == '__main__':
 
     if args.plot_type == 'gabby':
 
-        cache_name = gabby.GabbyDataModel.cache_name
+        cache_name = gabby.GabbyDataModel.cache_name(tgt)
         if cache_name in tgt_cache:
             logging.info(f"  Found data in the local cache.")
             data = tgt_cache[cache_name]
         else:
             logging.info(f"  No joy in the cache. Building data model")
-            data = gabby.GabbyDataModel(tgt)
-            data.fetch_from_db(db)
+            data = gabby.GabbyDataModel.from_cfg(tgt, db)
             tgt_cache[cache_name] = data
 
         if tgt.getboolean('fwd-prop'):
             # Forward propagation is from last observation to decay
             logging.info(f"  Forward propagation requested")
 
-            prop = gabby.StatsPropagator(tgt=tgt,
-                                         cfg=cfg,
-                                         global_cache=global_cache,
-                                         db=db)
-            prop.propagate(data, n_threads=args.n_threads)
+            prop = gabby.StatsPropagator.from_config(cfg, db, global_cache)
+            after_obs = tgt.getboolean('prop-after-observation')
+            prop_start = None
+            if 'fwd-prop-start-date' in tgt:
+                prop_start = gabby.parse_date_d(tgt['fwd-prop-start-date'])
+            prop.propagate(data,
+                           gabby.parse_date_d(tgt['incident']),
+                           rev=tgt.getboolean('rev-prop'),
+                           prop_start=prop_start,
+                           prop_after_obs=after_obs,
+                           n_threads=args.n_threads)
 
         plotter = gabby.GabbyPlotter(cfg=cfg['general'],
                                      tgt=tgt,
@@ -255,31 +261,31 @@ if __name__ == '__main__':
                                      output_dir=output_dir,
                                      data=data,
                                      db=db)
+
         plotter.plot(n_threads=args.n_threads)
 
     elif args.plot_type == 'num':
 
-        cache_name = gabby.GabbyDataModel.cache_name
+        cache_name = gabby.GabbyDataModel.cache_name(tgt)
         if cache_name in tgt_cache:
-            logging.info(f"  Found data in the local cache.")
+            logging.info(f"  Found the propagated data model in the cache.")
             data = tgt_cache[cache_name]
         else:
-            data = gabby.GabbyDataModel(tgt)
-            data.fetch_from_db(db)
+            data = gabby.GabbyDataModel.from_cfg(tgt, db)
             tgt_cache[cache_name] = data
 
         if tgt.getboolean('fwd-prop'):
             # Forward propagation is from last observation to decay
             logging.info(f"  Forward propagation requested")
 
-            prop = gabby.StatsPropagator(tgt=tgt,
-                                         cfg=cfg,
-                                         global_cache=global_cache,
-                                         db=db)
+            prop = gabby.StatsPropagator.from_config(cfg, db, global_cache)
             after_obs = tgt.getboolean('prop-after-observation')
             prop.propagate(data,
+                           gabby.parse_date_d(tgt['incident']),
+                           rev=tgt.getboolean('rev-prop'),
                            prop_after_obs=after_obs,
                            n_threads=args.n_threads)
+        print(data.Ns_obs)
 
         # Do the Deed!!!
         plotter = gabby.NumberPlotter(cfg=cfg['general'],
@@ -291,6 +297,24 @@ if __name__ == '__main__':
                                       db=db)
         plotter.plot(n_threads=args.n_threads)
 
+    elif args.plot_type == 'doom':
+        doom = gabby.DoomsdayPlotter(cfg=cfg,
+                                     tgt=tgt,
+                                     global_cache=global_cache,
+                                     tgt_cache=tgt_cache,
+                                     img_dir=img_dir,
+                                     output_dir=output_dir,
+                                     db=db)
+        data = doom.run_sim(n_threads=args.n_threads)
+
+        plotter = gabby.GabbyPlotter(cfg=cfg['general'],
+                                     tgt=tgt,
+                                     cache_dir=tgt_cache_dir,
+                                     img_dir=img_dir,
+                                     output_dir=output_dir,
+                                     data=data,
+                                     db=db)
+        plotter.plot(n_threads=args.n_threads)
+
     else:
         logging.critical(f"WHAT DID YOU DO??? {args.plot_type}")
-

@@ -70,6 +70,7 @@ class GabbyPlotContext(object):
                              self.data.dt.total_seconds())
 
         # The date on which we start showing forward propagation
+        self.fwd_prop_idx = None
         if 'fwd-prop-start-date' in self.tgt:
             timestr = self.tgt['fwd-prop-start-date']
             self.fwd_prop_start_dt = parse_date_d(timestr)
@@ -84,6 +85,8 @@ class GabbyPlotContext(object):
         else:
             self.fwd_prop_start_date = None
             self.fwd_prop_idx = None
+
+        assert(self.fwd_prop_idx is None or self.fwd_prop_idx is not None)
 
     def fetch_from_db(self, db):
         """Fetches any necessary data from the DB for the plot context.
@@ -378,20 +381,14 @@ class GabbyPlotter(object):
 
         logging.info(f"Plotting")
 
-        if 'gabby_plot_ctx' in self.cache:
-            logging.info(f"  Loading context from cache")
-            ctx = self.cache['gabby_plot_ctx']
-        else:
-            logging.info(f"  Building plot context")
-            ctx = GabbyPlotContext(tgt=self.tgt,
-                                   img_dir=self.img_dir,
-                                   data=self.data,
-                                   output_dir=self.output_dir)
-
-            logging.info(f"  Loading data from DB")
-            ctx.fetch_from_db(self.db)
-
-            self.cache.put('gabby_plot_ctx', ctx, [])
+        logging.info(f"  Building plot context")
+        ctx = GabbyPlotContext(tgt=self.tgt,
+                               img_dir=self.img_dir,
+                               data=self.data,
+                               output_dir=self.output_dir)
+        
+        logging.info(f"  Loading data from DB")
+        ctx.fetch_from_db(self.db)
 
         ctx.data.apt = None
 

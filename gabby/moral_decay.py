@@ -35,7 +35,7 @@ class MoralDecay(object):
       combination of A/P A and
     """
 
-    def __init__(self, decay_hist, resampled, derivatives,
+    def __init__(self, decay_hist,
                  Ap_min, Ap_max, dAp, Ad_min, Ad_max, dAd,
                  Pp_min, Pp_max, dPp, Pd_min, Pd_max, dPd):
 
@@ -59,6 +59,11 @@ class MoralDecay(object):
         self.n_P_bins = len(decay_hist[0][0])
         self.n_D_bins = len(decay_hist[0][0][0])
 
+        self.boundaries_Ap = np.linspace(Ap_min-dAp, Ap_max, self.n_A_bins+1)
+        self.boundaries_Pp = np.linspace(Pp_min-dPp, Pp_max, self.n_P_bins+1)
+        self.boundaries_Ad = np.linspace(Ad_min-dAd, Ad_max, self.n_D_bins+1)
+        self.boundaries_Pd = np.linspace(Pd_min-dPd, Pd_max, self.n_D_bins+1)
+
         self.bins_Ap = np.linspace(Ap_min, Ap_max, self.n_A_bins)
         self.bins_Pp = np.linspace(Pp_min, Pp_max, self.n_P_bins)
         self.bins_Ad = np.linspace(Ad_min, Ad_max, self.n_D_bins)
@@ -74,79 +79,64 @@ class MoralDecay(object):
         # FIXME: Triangular(ish) window works a bit better...don't
         # remember which window function this is and what its OOB
         # rejection is...also don't care right now.
-        window = np.array(list(range(1, n, 1))+[n]+list(range(n-1, 0, -1)))
-        kernel = np.sqrt(np.outer(window, window))
-        kernel /= np.sum(kernel)
+        # window = np.array(list(range(1, n, 1))+[n]+list(range(n-1, 0, -1)))
+        # kernel = np.sqrt(np.outer(window, window))
+        # kernel /= np.sum(kernel)
 
         # FIXME: Let's try a Blackman Harris Window
-        window = np.abs(np.blackman(m))
-        kernel = np.sqrt(np.outer(window, window))
-        kernel /= np.sum(kernel)
+        # window = np.abs(np.blackman(m))
+        # kernel = np.sqrt(np.outer(window, window))
+        # kernel /= np.sum(kernel)
 
         self.cdf = self._cdf()
         self.percentiles = self._percentiles()
         self.median = self._median(kernel=kernel)
         self.mean = self._mean(kernel=kernel)
 
-        # FIXME: Be nice to use a lowpass rather than median filter
-        # self.mean[0] = scipy.signal.medfilt2d(self.mean[0], kernel_size=5)
-        # self.mean[1] = scipy.signal.medfilt2d(self.mean[1], kernel_size=5)
-        # self.median[0] = scipy.signal.medfilt2d(self.median[0], kernel_size=1)
-        # self.median[1] = scipy.signal.medfilt2d(self.median[1], kernel_size=1)
+        import pprint
+        pprint.pprint(self.bins_Pp)
+        print(Pp_min, Pp_max)
 
-        #self._verify_derivatives()
+        pprint.pprint(self.bins_Ad)
+        pprint.pprint(self.bins_Pd)
+        print(Pd_min, Pd_max)
 
     def index_for(self, A, P):
         idx_A = min(int((A - self.Ap_min) / self.dAp), self.n_A_bins-1)
         idx_P = min(int((P - self.Pp_min) / self.dPp), self.n_P_bins-1)
-        return idx_A, idx_P
+        return max(idx_A, 0), max(idx_P, 0)
 
-    def _verify_derivatives(self):
-        all_deriv = []
-        for aidx in range(self.n_A_bins):
-            for pidx in range(self.n_P_bins):
-                print(f"Checking: {aidx}, {pidx}")
-                dAdt = self.median[0][aidx][pidx]
-                dPdt = self.median[1][aidx][pidx]
-                if not dAdt <= dPdt <= 0:
-                    print(self.bins_Ad)
-                    print(f"A':  {dAdt}")
-                    print(f"P':  {dPdt}")
-                    print(f"Del: {dAdt - dPdt}")
+    def rates(self, mat, A, P):
+        idx_A = max(min(int((A - self.Ap_min) / self.dAp), self.n_A_bins-1), 0)
+        idx_P = max(min(int((P - self.Pp_min) / self.dPp), self.n_P_bins-1), 0)
+        rem_A = ((A - self.Ap_min) / self.dAp) - idx_A
+        rem_P = ((P - self.Pp_min) / self.dPp) - idx_P
 
-                    # if aidx and pidx and aidx<self.n_A_bins-1 and pidx<self.n_P_bins-1:
-                    #     self.decay_hist[0][aidx][pidx] = (
-                    #         self.decay_hist[0][aidx-1][pidx-1]
-                    #         + self.decay_hist[0][aidx-1][pidx]
-                    #         + self.decay_hist[0][aidx-1][pidx+1]
-                    #         + self.decay_hist[0][aidx][pidx-1]
-                    #         + self.decay_hist[0][aidx][pidx]
-                    #         + self.decay_hist[0][aidx][pidx+1]
-                    #         + self.decay_hist[0][aidx+1][pidx-1]
-                    #         + self.decay_hist[0][aidx+1][pidx]
-                    #         + self.decay_hist[0][aidx+1][pidx+1])/9
+        if P > 800:
+            print(f"I={idx_P} R={rem_P}: {mat[1][idx_A][idx_P]}")
 
-                    #     self.decay_hist[1][aidx][pidx] = (
-                    #         self.decay_hist[1][aidx-1][pidx-1]
-                    #         + self.decay_hist[1][aidx-1][pidx]
-                    #         + self.decay_hist[1][aidx-1][pidx+1]
-                    #         + self.decay_hist[1][aidx][pidx-1]
-                    #         + self.decay_hist[1][aidx][pidx]
-                    #         + self.decay_hist[1][aidx][pidx+1]
-                    #         + self.decay_hist[1][aidx+1][pidx-1]
-                    #         + self.decay_hist[1][aidx+1][pidx]
-                    #         + self.decay_hist[1][aidx+1][pidx+1])/9
+        return mat[0][idx_A][idx_P], mat[1][idx_A][idx_P]
 
-                    fig = plt.figure(figsize=(12, 8))
-                    fig.suptitle(f"A: {aidx} P: {pidx}")
-                    ax = fig.add_subplot(1, 1, 1)
-                    ax.plot(self.bins_Ad, self.decay_hist[0][aidx][pidx],
-                            label='A')
-                    ax.plot(self.bins_Pd, self.decay_hist[1][aidx][pidx],
-                            label='P')
-                    ax.legend()
-                    fig.savefig(f"fail-{aidx}-{pidx}.png")
-                    #assert(False)
+        # num_A = mat[0][idx_A][idx_P]
+        # den_A = 1
+
+        # num_P = mat[1][idx_A][idx_P]
+        # den_P = 1
+
+        # if idx_A:
+        #     num_A += (1-A_rem)*mat[0][idx_A-1][idx_P]
+        #     den_A += (1-A_rem)
+        # if idx_P:
+        #     num_P += (1-P_rem)*mat[0][idx_A][idx_P-1]
+        #     den_P += (1-P_rem)
+        # if idx_A < self.n_A_bins-1:
+        #     num_A += A_rem*mat[0][idx_A+1][idx_P]
+        #     den_A += A_rem
+        # if idx_P < self.n_P_bins-1:
+        #     num_P += P_rem*mat[0][idx_P][idx_P+1]
+        #     den_P += P_rem
+
+        # return (num_A/den_A), (num_P/den_P)
 
     def _mean(self, kernel=None):
         """Finds the expectation value for each bin.
@@ -158,8 +148,8 @@ class MoralDecay(object):
         retval = np.zeros((2, self.n_A_bins, self.n_P_bins), dtype=np.float32)
         for i in range(self.n_A_bins):
             for j in range(self.n_P_bins):
-                retval[0][i][j] = np.sum((self.bins_Ad - self.dAd)*self.decay_hist[0][i][j])
-                retval[1][i][j] = np.sum((self.bins_Pd - self.dPd)*self.decay_hist[1][i][j])
+                retval[0][i][j] = np.sum((self.bins_Ad)*self.decay_hist[0][i][j])
+                retval[1][i][j] = np.sum((self.bins_Pd)*self.decay_hist[1][i][j])
                 assert(0 >= retval[0][i][j])
                 assert(0 >= retval[1][i][j])
 
@@ -194,7 +184,7 @@ class MoralDecay(object):
 
         return retval.astype(np.int8)
 
-    def plot_mesh(self, path, data='median', axis='A'):
+    def plot_mesh(self, path, data='mean', axis='A'):
         """Plots a 2-axis mesh of showing A/P/Z where Z is usually median.
 
         data: mean or median
@@ -211,7 +201,10 @@ class MoralDecay(object):
         ax = fig.add_subplot(1, 1, 1)
         ax.set_ylabel('Apogee Bin')
         ax.set_xlabel('Perigee Bin')
-        fig.suptitle('dA/dt (km/day)')
+        if axis == 'A':
+            fig.suptitle('dA/dt (km/day)')
+        else:
+            fig.suptitle('dP/dt (km/day)')
 
         idx = 0 if 'A' == axis else 1
         src = self.median if 'median' == data else self.mean
@@ -317,3 +310,8 @@ class MoralDecay(object):
             retval[1] = scipy.signal.convolve2d(retval[1], kernel, mode='same')
 
         return retval
+
+
+    @classmethod
+    def cache_name(cls, stats_cfg):
+        return 'moral_decay-' + cfg_hash(stats_cfg)

@@ -10,4 +10,7 @@ from ..defs import *
 
 
 class TestMoralDecay(object):
-    pass
+
+    def test_rates(self, static_decay):
+        print()
+        print(static_decay.boundaries_Ap)

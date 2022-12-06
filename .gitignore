@@ -5,6 +5,7 @@ output
 staging
 tle.db
 \#*
+calibration
 
 
 # Byte-compiled / optimized / DLL files
