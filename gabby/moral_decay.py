@@ -79,14 +79,14 @@ class MoralDecay(object):
         # FIXME: Triangular(ish) window works a bit better...don't
         # remember which window function this is and what its OOB
         # rejection is...also don't care right now.
-        window = np.array(list(range(1, n, 1))+[n]+list(range(n-1, 0, -1)))
-        kernel = np.sqrt(np.outer(window, window))
-        kernel /= np.sum(kernel)
+        # window = np.array(list(range(1, n, 1))+[n]+list(range(n-1, 0, -1)))
+        # kernel = np.sqrt(np.outer(window, window))
+        # kernel /= np.sum(kernel)
 
         # FIXME: Let's try a Blackman Harris Window
-        window = np.abs(np.blackman(m))
-        kernel = np.sqrt(np.outer(window, window))
-        kernel /= np.sum(kernel)
+        # window = np.abs(np.blackman(m))
+        # kernel = np.sqrt(np.outer(window, window))
+        # kernel /= np.sum(kernel)
 
         self.cdf = self._cdf()
         self.percentiles = self._percentiles()

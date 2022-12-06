@@ -268,7 +268,7 @@ if __name__ == '__main__':
 
         cache_name = gabby.GabbyDataModel.cache_name(tgt)
         if cache_name in tgt_cache:
-            logging.info(f"  Found data in the local cache.")
+            logging.info(f"  Found the propagated data model in the cache.")
             data = tgt_cache[cache_name]
         else:
             data = gabby.GabbyDataModel.from_cfg(tgt, db)
@@ -285,6 +285,7 @@ if __name__ == '__main__':
                            rev=tgt.getboolean('rev-prop'),
                            prop_after_obs=after_obs,
                            n_threads=args.n_threads)
+        print(data.Ns_obs)
 
         # Do the Deed!!!
         plotter = gabby.NumberPlotter(cfg=cfg['general'],
